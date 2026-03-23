@@ -1,6 +1,6 @@
 {
   "name": "@hasna/telephony",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Telephony platform for AI agents — SMS, WhatsApp, voice calls, TTS/STT, real-time streaming",
   "type": "module",
   "main": "dist/index.js",
