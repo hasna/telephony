@@ -1,0 +1,80 @@
+{
+  "name": "@hasna/telephony",
+  "version": "0.1.0",
+  "description": "Telephony platform for AI agents — SMS, WhatsApp, voice calls, TTS/STT, real-time streaming",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "telephony": "dist/cli/index.js",
+    "telephony-mcp": "dist/mcp/index.js",
+    "telephony-serve": "dist/server/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "dashboard/dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun build src/cli/index.ts --outdir dist/cli --target bun --external @modelcontextprotocol/sdk --external twilio && bun build src/mcp/index.ts --outdir dist/mcp --target bun --external @modelcontextprotocol/sdk --external twilio && bun build src/server/index.ts --outdir dist/server --target bun --external twilio && bun build src/index.ts --outdir dist --target bun --external twilio && tsc --emitDeclarationOnly --outDir dist",
+    "build:dashboard": "cd dashboard && bun run build",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "dev:cli": "bun run src/cli/index.ts",
+    "dev:mcp": "bun run src/mcp/index.ts",
+    "dev:serve": "bun run src/server/index.ts",
+    "prepublishOnly": "bun run build",
+    "postinstall": "mkdir -p $HOME/.hasna/telephony $HOME/.hasna/telephony/audio 2>/dev/null || true"
+  },
+  "keywords": [
+    "telephony",
+    "sms",
+    "whatsapp",
+    "voice",
+    "tts",
+    "stt",
+    "mcp",
+    "ai",
+    "coding-agent",
+    "twilio",
+    "elevenlabs",
+    "openai-realtime",
+    "cli",
+    "dashboard"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hasna/telephony.git"
+  },
+  "homepage": "https://github.com/hasna/telephony",
+  "bugs": {
+    "url": "https://github.com/hasna/telephony/issues"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "author": "Andrei Hasna <andrei@hasna.com>",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@hasna/cloud": "^0.1.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "commander": "^13.1.0",
+    "twilio": "^5.5.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.4",
+    "typescript": "^5.7.3"
+  }
+}
