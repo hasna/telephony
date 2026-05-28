@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { buildServer } from "./server.js";
 import { startMcpHttpServer } from "./http.js";
 
@@ -44,7 +45,7 @@ describe("telephony-mcp stdio transport", () => {
         { name: "telephony_list_projects", arguments: {} },
         undefined,
         { timeout: 10_000 },
-      );
+      ) as CallToolResult;
       expect(result.content[0]?.type).toBe("text");
     } finally {
       await transport.close();
@@ -79,7 +80,7 @@ describe("telephony-mcp HTTP transport", () => {
         { name: "telephony_list_projects", arguments: {} },
         undefined,
         { timeout: 10_000 },
-      );
+      ) as CallToolResult;
       expect(result.content[0]?.type).toBe("text");
       expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("[");
     } finally {
@@ -100,7 +101,7 @@ describe("telephony-mcp HTTP transport", () => {
           { name: "telephony_describe_tools", arguments: {} },
           undefined,
           { timeout: 10_000 },
-        );
+        ) as CallToolResult;
         expect(result.content[0]?.type).toBe("text");
       } finally {
         await transport.close();
