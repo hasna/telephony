@@ -2,7 +2,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import pkg from "../../package.json";
 import { buildServer } from "./server.js";
-import { DEFAULT_MCP_HTTP_PORT, isHttpMode, parseCliPort, startMcpHttpServer } from "./http.js";
+import { DEFAULT_MCP_HTTP_PORT, isStdioMode, parseCliPort, startMcpHttpServer } from "./http.js";
 
 function printHelp(): void {
   console.log(`Usage: telephony-mcp [options]
@@ -29,14 +29,14 @@ if (args.includes("--version") || args.includes("-V")) {
 }
 
 async function main(): Promise<void> {
-  if (isHttpMode(args)) {
-    await startMcpHttpServer({ name: "telephony", port: parseCliPort(args) });
+  if (isStdioMode(args)) {
+    const server = buildServer();
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
     return;
   }
-
-  const server = buildServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  // Default: shared Streamable HTTP server (one process per MCP, many agents).
+  await startMcpHttpServer({ name: "telephony", port: parseCliPort(args) });
 }
 
 main().catch((error) => {
