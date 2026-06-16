@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { registerEventsCommands } from "@hasna/events/commander";
 import { Command } from "commander";
 import { getDatabase } from "../db/database.js";
 import { registerAgent, listAgents, heartbeat, releaseAgent, getAgent, getAgentByName } from "../db/agents.js";
@@ -542,5 +543,6 @@ program
     process.env["TELEPHONY_PORT"] = opts.port;
     await import("../server/index.js");
   });
+registerEventsCommands(program, { source: "telephony" });
 
 program.parse();
