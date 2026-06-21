@@ -31,11 +31,19 @@ export function parseCliPort(args: string[]): number | undefined {
 }
 
 export function isHttpMode(args: string[]): boolean {
-  return args.includes("--http") || process.env.MCP_HTTP === "1";
+  return resolveMcpTransportMode(args) === "http";
 }
 
 export function isStdioMode(args: string[]): boolean {
-  return args.includes("--stdio") || process.env.MCP_STDIO === "1";
+  return resolveMcpTransportMode(args) === "stdio";
+}
+
+function resolveMcpTransportMode(args: string[]): "stdio" | "http" {
+  if (args.includes("--stdio")) return "stdio";
+  if (args.includes("--http")) return "http";
+  if (process.env.MCP_STDIO === "1") return "stdio";
+  if (process.env.MCP_HTTP === "1") return "http";
+  return "stdio";
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {

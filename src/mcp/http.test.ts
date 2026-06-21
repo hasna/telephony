@@ -4,14 +4,18 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { buildServer } from "./server.js";
-import { startMcpHttpServer } from "./http.js";
+import { isHttpMode, isStdioMode, startMcpHttpServer } from "./http.js";
 
 const repoRoot = new URL("../..", import.meta.url).pathname;
+const MCP_TRANSPORT_ENV_KEYS = new Set(["MCP_HTTP", "MCP_STDIO"]);
 
 function envWith(overrides: Record<string, string>): Record<string, string> {
   return {
     ...Object.fromEntries(
-      Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[1] === "string" && !MCP_TRANSPORT_ENV_KEYS.has(entry[0]),
+      ),
     ),
     TELEPHONY_DB_PATH: ":memory:",
     ...overrides,
@@ -22,6 +26,58 @@ describe("telephony MCP buildServer", () => {
   it("registers expected tools", async () => {
     const server = buildServer();
     expect(server).toBeDefined();
+  });
+});
+
+describe("telephony-mcp transport mode", () => {
+  const originalMcpHttp = process.env.MCP_HTTP;
+  const originalMcpStdio = process.env.MCP_STDIO;
+
+  afterEach(() => {
+    if (originalMcpHttp === undefined) delete process.env.MCP_HTTP;
+    else process.env.MCP_HTTP = originalMcpHttp;
+
+    if (originalMcpStdio === undefined) delete process.env.MCP_STDIO;
+    else process.env.MCP_STDIO = originalMcpStdio;
+  });
+
+  it("defaults to stdio unless HTTP mode is requested", () => {
+    delete process.env.MCP_HTTP;
+    delete process.env.MCP_STDIO;
+
+    expect(isStdioMode([])).toBe(true);
+    expect(isHttpMode([])).toBe(false);
+  });
+
+  it("uses HTTP mode when requested by CLI flag or environment", () => {
+    delete process.env.MCP_STDIO;
+
+    expect(isHttpMode(["--http"])).toBe(true);
+    expect(isStdioMode(["--http"])).toBe(false);
+
+    process.env.MCP_HTTP = "1";
+    expect(isHttpMode([])).toBe(true);
+    expect(isStdioMode([])).toBe(false);
+  });
+
+  it("keeps explicit stdio mode available", () => {
+    delete process.env.MCP_HTTP;
+    delete process.env.MCP_STDIO;
+
+    expect(isStdioMode(["--stdio"])).toBe(true);
+
+    process.env.MCP_STDIO = "1";
+    expect(isStdioMode([])).toBe(true);
+  });
+
+  it("does not leak ambient MCP transport mode into spawned test processes", () => {
+    process.env.MCP_HTTP = "1";
+    process.env.MCP_STDIO = "1";
+
+    const childEnv = envWith({});
+
+    expect(childEnv.MCP_HTTP).toBeUndefined();
+    expect(childEnv.MCP_STDIO).toBeUndefined();
   });
 });
 
