@@ -8,11 +8,8 @@ import { dispatchWebhook } from "../db/webhooks.js";
 
 export function parseFormBody(body: string): Record<string, string> {
   const params: Record<string, string> = {};
-  for (const pair of body.split("&")) {
-    const [key, val] = pair.split("=");
-    if (key && val !== undefined) {
-      params[decodeURIComponent(key)] = decodeURIComponent(val.replace(/\+/g, " "));
-    }
+  for (const [key, value] of new URLSearchParams(body)) {
+    if (key) params[key] = value;
   }
   return params;
 }
