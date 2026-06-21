@@ -54,11 +54,16 @@ class HttpError extends Error {
 async function parseBody(req: Request): Promise<Record<string, unknown>> {
   const ct = (req.headers.get("content-type") || "").toLowerCase();
   if (ct.includes("application/json")) {
+    let body: unknown;
     try {
-      return await req.json();
+      body = await req.json();
     } catch {
       throw new HttpError("Invalid JSON request body", 400);
     }
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      throw new HttpError("JSON request body must be an object", 400);
+    }
+    return body as Record<string, unknown>;
   }
   return {};
 }

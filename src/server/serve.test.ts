@@ -61,4 +61,23 @@ describe("REST API request parsing", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Invalid JSON request body" });
   });
+
+  it("returns 400 for JSON bodies that are not objects", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "telephony-server-test-"));
+    process.env.HASNA_TELEPHONY_DB_PATH = join(tempDir, "telephony.db");
+
+    const { createServer } = await import("./serve.js");
+    server = createServer(0);
+
+    for (const body of ["[]", "null", "\"hello\"", "42", "true"]) {
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/webhooks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "JSON request body must be an object" });
+    }
+  });
 });
