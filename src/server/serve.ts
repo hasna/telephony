@@ -42,9 +42,24 @@ function twiml(xml: string): Response {
   });
 }
 
+class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 async function parseBody(req: Request): Promise<Record<string, unknown>> {
-  const ct = req.headers.get("content-type") || "";
-  if (ct.includes("application/json")) return req.json();
+  const ct = (req.headers.get("content-type") || "").toLowerCase();
+  if (ct.includes("application/json")) {
+    try {
+      return await req.json();
+    } catch {
+      throw new HttpError("Invalid JSON request body", 400);
+    }
+  }
   return {};
 }
 
@@ -203,6 +218,7 @@ export function createServer(port: number = 19451) {
 
         return json({ error: "Not found" }, 404);
       } catch (err: any) {
+        if (err instanceof HttpError) return json({ error: err.message }, err.status);
         return json({ error: err.message }, 500);
       }
     },
