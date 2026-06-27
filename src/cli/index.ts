@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { registerEventsCommands } from "@hasna/events/commander";
 import { Command } from "commander";
+import pkg from "../../package.json";
 import { getDatabase } from "../db/database.js";
 import { registerAgent, listAgents, heartbeat, releaseAgent, getAgent, getAgentByName } from "../db/agents.js";
 import { createProject, listProjects, getProject, deleteProject } from "../db/projects.js";
@@ -29,7 +30,7 @@ const program = new Command();
 program
   .name("telephony")
   .description("Telephony platform for AI agents — SMS, WhatsApp, voice, TTS/STT")
-  .version("0.1.0");
+  .version(pkg.version);
 
 // ---------------------------------------------------------------------------
 // SMS

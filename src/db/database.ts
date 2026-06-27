@@ -1,5 +1,5 @@
 import { SqliteAdapter as Database } from "@hasna/cloud";
-import { existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -16,6 +16,28 @@ export function uuid(): string {
 
 function isInMemoryDb(path: string): boolean {
   return path === ":memory:" || path.startsWith("file::memory:");
+}
+
+function copyDirectory(sourceDir: string, targetDir: string): void {
+  try {
+    mkdirSync(targetDir, { recursive: true });
+    for (const entry of readdirSync(sourceDir)) {
+      const sourcePath = join(sourceDir, entry);
+      const targetPath = join(targetDir, entry);
+      try {
+        const stat = statSync(sourcePath);
+        if (stat.isDirectory()) {
+          copyDirectory(sourcePath, targetPath);
+        } else if (stat.isFile() && !existsSync(targetPath)) {
+          copyFileSync(sourcePath, targetPath);
+        }
+      } catch {
+        // Best-effort legacy migration; unreadable entries should not block startup.
+      }
+    }
+  } catch {
+    // Best-effort legacy migration; unreadable directories should not block startup.
+  }
 }
 
 function findNearestDb(startDir: string): string | null {
@@ -41,7 +63,7 @@ function findGitRoot(startDir: string): string | null {
   return null;
 }
 
-function getDbPath(): string {
+export function getDbPath(): string {
   if (process.env["HASNA_TELEPHONY_DB_PATH"]) {
     return process.env["HASNA_TELEPHONY_DB_PATH"];
   }
@@ -61,11 +83,12 @@ function getDbPath(): string {
   }
 
   const home = process.env["HOME"] || process.env["USERPROFILE"] || "~";
-  const newPath = join(home, ".hasna", "telephony", "telephony.db");
-  const legacyPath = join(home, ".telephony", "telephony.db");
+  const newDir = join(home, ".hasna", "telephony");
+  const legacyDir = join(home, ".telephony");
+  const newPath = join(newDir, "telephony.db");
 
-  if (!existsSync(newPath) && existsSync(legacyPath)) {
-    return legacyPath;
+  if (!existsSync(newPath) && existsSync(legacyDir)) {
+    copyDirectory(legacyDir, newDir);
   }
 
   return newPath;

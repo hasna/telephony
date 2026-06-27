@@ -1,3 +1,4 @@
+import pkg from "../../package.json";
 import { getDatabase } from "../db/database.js";
 import { registerAgent, listAgents, heartbeat, getAgent } from "../db/agents.js";
 import { createProject, listProjects, getProject, deleteProject } from "../db/projects.js";
@@ -117,7 +118,7 @@ export function createServer(port: number = 19451) {
         }
 
         // --- Health ---
-        if (path === "/health") return json({ status: "ok", version: "0.1.0" });
+        if (path === "/health") return json({ status: "ok", version: pkg.version });
 
         // --- API Routes ---
         if (path === "/api/sms/send" && req.method === "POST") {

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import pkg from "../../package.json";
 import { getDatabase } from "../db/database.js";
 import { registerAgent, listAgents, heartbeat, getAgent, getAgentByName } from "../db/agents.js";
 import { createProject, listProjects } from "../db/projects.js";
@@ -23,7 +24,7 @@ import { tick } from "../lib/scheduler.js";
 export function buildServer(): McpServer {
   getDatabase();
 
-  const server = new McpServer({ name: "telephony", version: "0.1.0" });
+  const server = new McpServer({ name: "telephony", version: pkg.version });
 
   // --- Agents ---
   server.tool("telephony_register_agent", "Register an agent", {
@@ -195,7 +196,7 @@ export function buildServer(): McpServer {
   }, async (args) => {
     try {
       const db = getDatabase();
-      db.prepare("INSERT INTO feedback (message, email, category, version) VALUES (?, ?, ?, ?)").run(args.message, args.email || null, args.category || "general", "0.1.0");
+      db.prepare("INSERT INTO feedback (message, email, category, version) VALUES (?, ?, ?, ?)").run(args.message, args.email || null, args.category || "general", pkg.version);
       return { content: [{ type: "text" as const, text: "Feedback saved. Thank you!" }] };
     } catch (e: any) {
       return { content: [{ type: "text" as const, text: String(e) }], isError: true };
