@@ -1,6 +1,6 @@
 {
   "name": "@hasna/telephony",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Telephony platform for AI agents — SMS, WhatsApp, voice calls, TTS/STT, real-time streaming",
   "type": "module",
   "main": "dist/index.js",
@@ -23,14 +23,14 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/cli/index.ts --outdir dist/cli --target bun --external @modelcontextprotocol/sdk --external twilio && bun build src/mcp/index.ts --outdir dist/mcp --target bun --external @modelcontextprotocol/sdk --external twilio && bun build src/server/index.ts --outdir dist/server --target bun --external twilio && bun build src/index.ts --outdir dist --target bun --external twilio && tsc --emitDeclarationOnly --outDir dist",
+    "build": "rm -rf dist && bun build src/cli/index.ts --outdir dist/cli --target bun --external @modelcontextprotocol/sdk --external twilio && bun build src/mcp/index.ts --outdir dist/mcp --target bun --external @modelcontextprotocol/sdk --external twilio && bun build src/server/index.ts --outdir dist/server --target bun --external twilio && bun build src/index.ts --outdir dist --target bun --external twilio && tsc --emitDeclarationOnly --outDir dist",
     "build:dashboard": "cd dashboard && bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "dev:cli": "bun run src/cli/index.ts",
     "dev:mcp": "bun run src/mcp/index.ts",
     "dev:serve": "bun run src/server/index.ts",
-    "prepublishOnly": "bun run build",
+    "prepublishOnly": "bun run typecheck && bun test && bun run build",
     "postinstall": "mkdir -p $HOME/.hasna/telephony $HOME/.hasna/telephony/audio 2>/dev/null || true"
   },
   "keywords": [
@@ -55,7 +55,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/hasna/telephony.git"
+    "url": "git+https://github.com/hasna/telephony.git"
   },
   "homepage": "https://github.com/hasna/telephony",
   "bugs": {
@@ -67,7 +67,6 @@
   "author": "Andrei Hasna <andrei@hasna.com>",
   "license": "Apache-2.0",
   "dependencies": {
-    "@hasna/cloud": "0.1.24",
     "@hasna/events": "^0.1.6",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "commander": "^13.1.0",

@@ -1,5 +1,6 @@
 /**
- * PostgreSQL migrations for open-telephony cloud sync.
+ * PostgreSQL schema translations for external deployments that provide their
+ * own database adapter.
  */
 export const PG_MIGRATIONS: string[] = [
   // Migration 1: Full schema

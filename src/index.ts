@@ -65,7 +65,7 @@ export { saveAudio, loadAudio, encodeBase64, audioExists, generateAudioFilename,
 // Lib: Cerebras AI
 export { generateSchedule, generateMessage, analyzeIncomingMessage } from "./lib/cerebras.js";
 
-// Lib: Realtime (cloud-only)
+// Lib: Realtime (public webhook mode)
 export { isCloudMode, createRealtimeSession, connectOpenAI, handleTwilioMediaStream, closeSession as closeRealtimeSession, generateRealtimeTwiml } from "./lib/realtime.js";
 
 // Lib: Scheduler
@@ -74,7 +74,7 @@ export { runSchedule, tick, startScheduler, stopScheduler } from "./lib/schedule
 // Lib: Config
 export { getConfig, requireConfig } from "./lib/config.js";
 
-// PG Migrations (cloud sync)
+// PG Migrations (external PostgreSQL deployments)
 export { PG_MIGRATIONS } from "./lib/pg-migrations.js";
 
 // Types

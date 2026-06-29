@@ -2,7 +2,7 @@ import { getConfig } from "./config.js";
 
 /**
  * OpenAI Realtime API voice streaming bridge.
- * Cloud-only feature — requires a server with a public URL for Twilio Media Streams.
+ * Requires a server with a public URL for Twilio Media Streams.
  *
  * Architecture:
  *   Twilio (phone call) → Media Stream WebSocket → This bridge → OpenAI Realtime WebSocket
@@ -28,7 +28,7 @@ export function isCloudMode(): boolean {
 
 export function createRealtimeSession(callSid: string): RealtimeSession {
   if (!isCloudMode()) {
-    throw new Error("OpenAI Realtime streaming requires cloud mode (TELEPHONY_WEBHOOK_URL must be set)");
+    throw new Error("OpenAI Realtime streaming requires TELEPHONY_WEBHOOK_URL to be set");
   }
 
   const session: RealtimeSession = {

@@ -1,4 +1,4 @@
-import type { SqliteAdapter as Database } from "@hasna/cloud";
+import type { SqliteAdapter as Database } from "./sqlite-adapter.js";
 import type { Agent, AgentConflictError, AgentRow, AgentStatus, RegisterAgentInput } from "../types/index.js";
 import { getDatabase, now } from "./database.js";
 

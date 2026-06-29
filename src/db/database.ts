@@ -1,4 +1,4 @@
-import { SqliteAdapter as Database } from "@hasna/cloud";
+import { SqliteAdapter as Database } from "./sqlite-adapter.js";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -311,6 +311,8 @@ const MIGRATIONS = [
     INSERT INTO messages_fts(messages_fts, rowid, body) VALUES('delete', old.rowid, old.body);
     INSERT INTO messages_fts(rowid, body) VALUES (new.rowid, new.body);
   END;
+
+  INSERT INTO messages_fts(messages_fts) VALUES('rebuild');
   `,
 ];
 
@@ -325,6 +327,12 @@ export function getDatabase(path?: string): Database {
   const targetPath = path || getDbPath();
   if (_db && _dbPath === targetPath) return _db;
 
+  if (_db) {
+    _db.close();
+    _db = null;
+    _dbPath = null;
+  }
+
   ensureDir(targetPath);
   const db = new Database(targetPath);
 
@@ -336,8 +344,10 @@ export function getDatabase(path?: string): Database {
 
   for (let i = 0; i < MIGRATIONS.length; i++) {
     if (!applied.has(i + 1)) {
-      db.exec(MIGRATIONS[i]!);
-      db.run("INSERT INTO _migrations (version, applied_at) VALUES (?, ?)", [i + 1, now()]);
+      db.transaction(() => {
+        db.exec(MIGRATIONS[i]!);
+        db.run("INSERT INTO _migrations (version, applied_at) VALUES (?, ?)", [i + 1, now()]);
+      });
     }
   }
 

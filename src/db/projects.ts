@@ -1,4 +1,4 @@
-import type { SqliteAdapter as Database } from "@hasna/cloud";
+import type { SqliteAdapter as Database } from "./sqlite-adapter.js";
 import type { CreateProjectInput, Project } from "../types/index.js";
 import { ProjectNotFoundError } from "../types/index.js";
 import { getDatabase, now, uuid } from "./database.js";

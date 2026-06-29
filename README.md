@@ -48,19 +48,16 @@ Default port **8839** (`--port` / `MCP_HTTP_PORT`). Endpoints: `GET /health`, `P
 telephony-serve
 ```
 
-## Cloud Sync
-
-This package supports cloud sync via `@hasna/cloud`:
-
-```bash
-cloud setup
-cloud sync push --service telephony
-cloud sync pull --service telephony
-```
-
 ## Data Directory
 
-Data is stored in `~/.hasna/telephony/`.
+Telephony owns its local SQLite store directly. By default data is stored in
+`~/.hasna/telephony/`; set `HASNA_TELEPHONY_DB_PATH` or `TELEPHONY_DB_PATH` to
+use a specific database file, or set `TELEPHONY_DB_SCOPE=project` to use
+`.telephony/telephony.db` under the nearest git root.
+
+Realtime voice streaming requires a public webhook URL for Twilio Media Streams.
+External PostgreSQL deployments may reuse the exported `PG_MIGRATIONS` schema
+with their own database adapter.
 
 ## License
 

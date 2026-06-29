@@ -1,4 +1,4 @@
-import type { SqliteAdapter as Database } from "@hasna/cloud";
+import type { SqliteAdapter as Database } from "./sqlite-adapter.js";
 import type { CreateSessionInput, Session, SessionRow } from "../types/index.js";
 import { getDatabase, now, uuid } from "./database.js";
 

@@ -17,5 +17,5 @@
     "types": ["bun-types"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "dashboard"]
+  "exclude": ["node_modules", "dist", "dashboard", "src/**/*.test.ts"]
 }
