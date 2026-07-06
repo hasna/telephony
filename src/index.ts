@@ -1,6 +1,13 @@
-// REST SDK Client
+// REST SDK Client (legacy hand-rolled client, kept for compatibility)
 export { TelephonyClient, createClient } from "./sdk.js";
 export type { TelephonyClientOptions } from "./sdk.js";
+
+// Generated typed SDK client (from the telephony-serve OpenAPI document)
+export { TelephonyApiClient } from "./generated/telephony-api-client.js";
+
+// Cloud storage (PURE REMOTE / Amendment A1)
+export { createTelephonyCloudClient, PgAdapterAsync, TELEPHONY_APP_NAME } from "./db/remote-storage.js";
+export { telephonyOpenApi, startTelephonyServe, createServeHandler, TELEPHONY_SERVE_APP } from "./server/cloud-serve.js";
 
 // Core database
 export { getDatabase, closeDatabase, resetDatabase, resolvePartialId, now, uuid } from "./db/database.js";

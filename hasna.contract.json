@@ -1,0 +1,34 @@
+{
+  "schema": "hasna.service_contract.v1",
+  "name": "telephony",
+  "class": "service",
+  "contractVersion": "v1",
+  "kitVersion": "0.4.1",
+  "description": "Telephony platform for AI agents — SMS, WhatsApp, voice, TTS/STT. CLI + MCP + HTTP API (telephony-serve) + generated SDK. Local mode uses SQLite at ~/.hasna/telephony/telephony.db; cloud mode (HASNA_TELEPHONY_STORAGE_MODE=cloud) is PURE REMOTE per Amendment A1: the serve process reads/writes the shared cloud Postgres directly, with API-key auth via @hasna/contracts.",
+  "bins": ["telephony", "telephony-mcp", "telephony-serve"],
+  "storage": {
+    "mode": "local",
+    "envPrefix": "HASNA_TELEPHONY_",
+    "aliasEnvPrefix": "TELEPHONY_",
+    "databaseUrlSecretRef": "hasna/oss/telephony/database-url",
+    "sqlitePath": "~/.hasna/telephony/telephony.db"
+  },
+  "metadata": {
+    "service": {
+      "port": 8080,
+      "healthPath": "/health",
+      "readyPath": "/ready",
+      "versionPath": "/version",
+      "openapiPath": "/openapi.json",
+      "apiVersion": "v1",
+      "auth": "api-key",
+      "signingSecretSecretRef": "hasna/oss/telephony/api-key-signing-secret",
+      "migrationCommand": ["bun", "scripts/apply-cloud-migrations.mjs"],
+      "ownerDatabaseUrlSecretRef": "hasna/oss/telephony/database-url-owner"
+    },
+    "client": {
+      "apiUrlEnv": "TELEPHONY_API_URL",
+      "apiKeyEnv": "TELEPHONY_API_KEY"
+    }
+  }
+}
