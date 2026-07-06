@@ -8,7 +8,7 @@
   "bin": {
     "telephony": "dist/cli/index.js",
     "telephony-mcp": "dist/mcp/index.js",
-    "telephony-serve": "dist/server/index.js"
+    "telephony-serve": "dist/server/cloud-entry.js"
   },
   "exports": {
     ".": {
@@ -18,18 +18,25 @@
   },
   "files": [
     "dist",
+    "src",
+    "scripts",
     "dashboard/dist",
+    "hasna.contract.json",
     "LICENSE",
     "README.md"
   ],
   "scripts": {
-    "build": "rm -rf dist && bun build src/cli/index.ts --outdir dist/cli --target bun --external @modelcontextprotocol/sdk --external twilio && bun build src/mcp/index.ts --outdir dist/mcp --target bun --external @modelcontextprotocol/sdk --external twilio && bun build src/server/index.ts --outdir dist/server --target bun --external twilio && bun build src/index.ts --outdir dist --target bun --external twilio && tsc --emitDeclarationOnly --outDir dist",
+    "generate:sdk": "bun scripts/generate-sdk.mjs",
+    "build": "bun run generate:sdk && rm -rf dist && bun build src/cli/index.ts --outdir dist/cli --target bun --external @modelcontextprotocol/sdk --external twilio --external pg --external @hasna/contracts && bun build src/mcp/index.ts --outdir dist/mcp --target bun --external @modelcontextprotocol/sdk --external twilio --external pg --external @hasna/contracts && bun build src/server/cloud-entry.ts --outdir dist/server --target bun --external twilio --external pg --external @hasna/contracts && bun build src/server/index.ts --outdir dist/server --target bun --external twilio --external pg --external @hasna/contracts && bun build src/index.ts --outdir dist --target bun --external twilio --external pg --external @hasna/contracts && tsc --emitDeclarationOnly --outDir dist",
     "build:dashboard": "cd dashboard && bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "dev:cli": "bun run src/cli/index.ts",
     "dev:mcp": "bun run src/mcp/index.ts",
-    "dev:serve": "bun run src/server/index.ts",
+    "dev:serve": "bun run src/server/cloud-entry.ts",
+    "dev:serve:local": "bun run src/server/index.ts",
+    "migrate:cloud": "bun scripts/apply-cloud-migrations.mjs",
+    "serve": "bun src/server/cloud-entry.ts",
     "prepublishOnly": "bun run typecheck && bun test && bun run build",
     "postinstall": "mkdir -p $HOME/.hasna/telephony $HOME/.hasna/telephony/audio 2>/dev/null || true"
   },
@@ -67,14 +74,17 @@
   "author": "Andrei Hasna <andrei@hasna.com>",
   "license": "Apache-2.0",
   "dependencies": {
+    "@hasna/contracts": "^0.4.1",
     "@hasna/events": "^0.1.6",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "commander": "^13.1.0",
+    "pg": "^8.13.1",
     "twilio": "^5.5.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/bun": "^1.2.4",
+    "@types/pg": "^8.11.10",
     "typescript": "^5.7.3"
   }
 }
