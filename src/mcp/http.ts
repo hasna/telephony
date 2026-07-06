@@ -1,6 +1,25 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { resolveMcpHttpPort as harnessResolveMcpHttpPort } from "@hasna/mcp-harness";
+import { handleStatelessMcpNode } from "@hasna/mcp-harness/node";
 import { buildServer } from "./server.js";
+
+/**
+ * open-telephony MCP transport/port boilerplate — now a thin shim over
+ * `@hasna/mcp-harness`. The public API (names, signatures, health shape) is
+ * preserved so `mcp/index.ts` and the tests are unchanged; the `POST /mcp`
+ * request handling and env/default port resolution now delegate to the
+ * shared harness.
+ *
+ * Two bits stay hand-wired because telephony's dialect diverges from the
+ * harness's own semantics:
+ *   - `isHttpMode`/`isStdioMode` default to **stdio** when neither `--http`/
+ *     `--stdio` nor `MCP_HTTP`/`MCP_STDIO` is set. The harness treats the two
+ *     as independent, no-default flags (see open-files/open-crawl, which
+ *     default to HTTP), so delegating here would flip telephony's default
+ *     transport.
+ *   - `parseCliPort` has no harness equivalent (bare `--port` argv lookup,
+ *     no env/default fallback) and is used by the CLI's `--port` flag.
+ */
 
 export const DEFAULT_MCP_HTTP_PORT = 8884;
 const DEFAULT_HOST = "127.0.0.1";
@@ -12,13 +31,9 @@ export interface McpHttpServerOptions {
 }
 
 export function resolveMcpHttpPort(explicitPort?: number): number {
-  if (explicitPort !== undefined && !Number.isNaN(explicitPort)) return explicitPort;
-  const envPort = process.env.MCP_HTTP_PORT;
-  if (envPort) {
-    const parsed = parseInt(envPort, 10);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-  return DEFAULT_MCP_HTTP_PORT;
+  // argv: [] — CLI already resolved any --port flag into `explicitPort` via
+  // `parseCliPort`; avoid re-parsing process.argv a second time.
+  return harnessResolveMcpHttpPort({ explicit: explicitPort, argv: [], default: DEFAULT_MCP_HTTP_PORT });
 }
 
 export function parseCliPort(args: string[]): number | undefined {
@@ -30,14 +45,6 @@ export function parseCliPort(args: string[]): number | undefined {
   return undefined;
 }
 
-export function isHttpMode(args: string[]): boolean {
-  return resolveMcpTransportMode(args) === "http";
-}
-
-export function isStdioMode(args: string[]): boolean {
-  return resolveMcpTransportMode(args) === "stdio";
-}
-
 function resolveMcpTransportMode(args: string[]): "stdio" | "http" {
   if (args.includes("--stdio")) return "stdio";
   if (args.includes("--http")) return "http";
@@ -46,12 +53,12 @@ function resolveMcpTransportMode(args: string[]): "stdio" | "http" {
   return "stdio";
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  const text = Buffer.concat(chunks).toString("utf8");
-  if (!text.trim()) return undefined;
-  return JSON.parse(text);
+export function isHttpMode(args: string[]): boolean {
+  return resolveMcpTransportMode(args) === "http";
+}
+
+export function isStdioMode(args: string[]): boolean {
+  return resolveMcpTransportMode(args) === "stdio";
 }
 
 export async function startMcpHttpServer(options: McpHttpServerOptions): Promise<{ server: Server; port: number; host: string }> {
@@ -79,21 +86,7 @@ export async function startMcpHttpServer(options: McpHttpServerOptions): Promise
       return;
     }
 
-    const mcpServer = buildServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
-
-    try {
-      await mcpServer.connect(transport);
-      const body = req.method === "POST" ? await readJsonBody(req) : undefined;
-      await transport.handleRequest(req, res, body);
-    } finally {
-      res.on("close", () => {
-        void transport.close();
-        void mcpServer.close();
-      });
-    }
+    await handleStatelessMcpNode(req, res, buildServer, options.name);
   });
 
   await new Promise<void>((resolve, reject) => {
