@@ -143,6 +143,11 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
         `Deprecated mode '${deprecatedAlias}' from ${modeHit.key} is treated as 'cloud'. Prefer ${keys.modeKeys[0]}=cloud.`,
       );
     }
+  } else if (urlHit && keyHit) {
+    // Inferred cloud mode: when both the API URL and API key are set (with no
+    // explicit STORAGE_MODE), route to cloud. Matches @hasna/contracts@0.5.1.
+    mode = "cloud";
+    modeSource = `${urlHit.key}+${keyHit.key}`;
   }
 
   // Local mode: never route to the network, regardless of URL/key presence.
