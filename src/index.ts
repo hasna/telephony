@@ -81,6 +81,30 @@ export { runSchedule, tick, startScheduler, stopScheduler } from "./lib/schedule
 // Lib: Config
 export { getConfig, requireConfig } from "./lib/config.js";
 
+// Lib: Safety gates
+export {
+  computeTwilioSignature,
+  enforceTelephonyMutationGate,
+  listQueuedTelephonyMutations,
+  requireRestApiAuth,
+  resetTelephonySafetyState,
+  retryQueuedTelephonyMutation,
+  telephonyProviderSafetyMatrix,
+  telephonyProviderSmoke,
+  TELEPHONY_OPERATION_GATES,
+  validateOutboundTarget,
+  validateProvisioningCountry,
+  verifyTwilioWebhookRequest,
+} from "./lib/safety.js";
+export type {
+  TelephonyMutationOperation,
+  TelephonyOperation,
+  TelephonyOperationGate,
+  TelephonyProviderMode,
+  TelephonyQueuedMutation,
+  TelephonyQueuedMutationStatus,
+} from "./lib/safety.js";
+
 // PG Migrations (external PostgreSQL deployments)
 export { PG_MIGRATIONS } from "./lib/pg-migrations.js";
 
