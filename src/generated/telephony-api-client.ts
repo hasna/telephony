@@ -20,7 +20,7 @@ export interface ProjectList { "items": Array<Project>; "total": number }
 
 export interface Agent { "id": string; "name": string; "description"?: string | null; "session_id"?: string | null; "project_id"?: string | null; "capabilities"?: Array<string>; "permissions"?: Array<string>; "status": string; "metadata"?: Record<string, unknown>; "last_seen_at"?: string; "created_at": string; "updated_at": string }
 
-export interface AgentInput { "name": string }
+export interface AgentInput { "name": string; "description"?: string | null; "session_id"?: string | null; "project_id"?: string | null; "capabilities"?: Array<string>; "permissions"?: Array<string>; "force"?: boolean }
 
 export interface AgentList { "items": Array<Agent>; "total": number }
 
@@ -108,10 +108,10 @@ export class TelephonyApiClient {
   }
 
     /** List agents */
-    async listAgents(init?: RequestInit): Promise<AgentList> {
+    async listAgents(query?: { "agent_id"?: string; "project_id"?: string }, init?: RequestInit): Promise<AgentList> {
       return this.request("GET", `/v1/agents`, {
         body: undefined,
-        query: undefined,
+        query,
         init,
       });
     }
@@ -144,7 +144,7 @@ export class TelephonyApiClient {
     }
 
     /** List contacts */
-    async listContacts(query?: { "limit"?: number; "offset"?: number; "search"?: string }, init?: RequestInit): Promise<ContactList> {
+    async listContacts(query?: { "limit"?: number; "offset"?: number; "search"?: string; "agent_id"?: string; "project_id"?: string }, init?: RequestInit): Promise<ContactList> {
       return this.request("GET", `/v1/contacts`, {
         body: undefined,
         query,

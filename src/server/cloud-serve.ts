@@ -137,6 +137,21 @@ function clampLimit(raw: string | null, def = 50, max = 200): number {
   return Math.min(Math.max(Math.trunc(n), 1), max);
 }
 
+/**
+ * The window after which an agent's held session is considered stale — matches
+ * the local db/agents.ts default (30 min, overridable via
+ * TELEPHONY_AGENT_TIMEOUT_MS) so registration takeover behaves identically in
+ * local and cloud mode.
+ */
+function agentActiveWindowMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.TELEPHONY_AGENT_TIMEOUT_MS;
+  if (raw) {
+    const parsed = parseInt(raw, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 30 * 60 * 1000;
+}
+
 // ---------------------------------------------------------------------------
 // Repositories — cloud Postgres (PURE REMOTE / A1)
 // ---------------------------------------------------------------------------
@@ -382,11 +397,23 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
           const offset = Math.max(Number(url.searchParams.get("offset") ?? 0) || 0, 0);
           const search = url.searchParams.get("search");
           const params: unknown[] = [];
-          let where = "";
+          const conds: string[] = [];
+          // Parity with LocalStore.listContacts: agent_id/project_id are exact
+          // scoping filters. Dropping them in cloud mode over-exposed every
+          // agent's contacts across the shared fleet.
+          for (const col of ["agent_id", "project_id"]) {
+            const val = url.searchParams.get(col);
+            if (val != null && val !== "") {
+              params.push(val);
+              conds.push(`${col} = $${params.length}`);
+            }
+          }
           if (search) {
             params.push(`%${search}%`);
-            where = `WHERE (name ILIKE $1 OR phone ILIKE $1 OR email ILIKE $1)`;
+            const idx = params.length;
+            conds.push(`(name ILIKE $${idx} OR phone ILIKE $${idx} OR email ILIKE $${idx})`);
           }
+          const where = conds.length > 0 ? `WHERE ${conds.join(" AND ")}` : "";
           const total = await db.get<{ count: string }>(
             `SELECT count(*)::text AS count FROM contacts ${where}`,
             params,
@@ -508,23 +535,94 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
       if (path === "/v1/agents") {
         if (method === "GET") {
           await authOrThrow(req, ["telephony:read"]);
+          // Parity with LocalStore.listAgents: agent_id/project_id are exact
+          // scoping filters served DB-side (they were silently dropped before,
+          // so `--project X` returned every agent in cloud mode).
+          const where: string[] = [`status != 'archived'`];
+          const params: unknown[] = [];
+          for (const col of ["agent_id", "project_id"]) {
+            const val = url.searchParams.get(col);
+            if (val != null && val !== "") {
+              params.push(val);
+              // agent_id maps to the primary key `id`.
+              where.push(`${col === "agent_id" ? "id" : col} = $${params.length}`);
+            }
+          }
           const rows = await db.many<Row>(
-            `SELECT * FROM agents WHERE status != 'archived' ORDER BY last_seen_at DESC LIMIT 200`,
+            `SELECT * FROM agents WHERE ${where.join(" AND ")} ORDER BY last_seen_at DESC LIMIT 200`,
+            params,
           );
           return json({ items: rows.map(mapAgent), total: rows.length });
         }
         if (method === "POST") {
           await authOrThrow(req, ["telephony:write"]);
           const body = await readBody(req);
-          const name = requireString(body, "name");
+          // Parity with LocalStore.registerAgent (db/agents.ts): normalize the
+          // name (trim + lowercase), then enforce active-session conflict /
+          // force-takeover semantics. Previously the cloud route did a blind
+          // INSERT — no normalization, no conflict detection — so the same name
+          // could be registered by two live sessions (split-brain identity).
+          const name = requireString(body, "name").trim().toLowerCase();
+          const sessionId = (body.session_id as string) ?? null;
+          const force = body.force === true;
+          const existing = await db.get<Row>(`SELECT * FROM agents WHERE LOWER(name) = $1`, [name]);
+          if (existing) {
+            const existingSession = (existing.session_id as string | null) ?? null;
+            // Same session re-registering: refresh liveness, return existing.
+            if (sessionId && existingSession === sessionId) {
+              const row = await db.get<Row>(
+                `UPDATE agents SET last_seen_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING *`,
+                [existing.id],
+              );
+              return json(mapAgent(row!), 200);
+            }
+            const lastSeenMs = Date.parse(iso(existing.last_seen_at));
+            const isStale = !Number.isFinite(lastSeenMs) || Date.now() - lastSeenMs > agentActiveWindowMs();
+            // Held by a live session and not forced: conflict (never overwrite).
+            if (!isStale && !force && existingSession) {
+              return json(
+                {
+                  error: "conflict",
+                  message: `Agent name "${name}" is currently held by an active session`,
+                  existing_agent: mapAgent(existing),
+                },
+                409,
+              );
+            }
+            // Takeover (stale session or --force).
+            const row = await db.get<Row>(
+              `UPDATE agents SET session_id = $1, description = COALESCE($2, description),
+                 project_id = COALESCE($3, project_id), capabilities = $4, permissions = $5,
+                 status = 'active', metadata = '{}', last_seen_at = NOW(), updated_at = NOW()
+               WHERE id = $6 RETURNING *`,
+              [
+                sessionId,
+                (body.description as string) ?? null,
+                (body.project_id as string) ?? null,
+                JSON.stringify(
+                  Array.isArray(body.capabilities)
+                    ? body.capabilities
+                    : parseJson<string[]>(existing.capabilities, []),
+                ),
+                JSON.stringify(
+                  Array.isArray(body.permissions)
+                    ? body.permissions
+                    : parseJson<string[]>(existing.permissions, ["*"]),
+                ),
+                existing.id,
+              ],
+            );
+            return json(mapAgent(row!), 200);
+          }
+          // Brand-new agent — persist the normalized name.
           const row = await db.get<Row>(
-            `INSERT INTO agents (id, name, description, session_id, project_id, capabilities, permissions)
-             VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+            `INSERT INTO agents (id, name, description, session_id, project_id, capabilities, permissions, status, metadata)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'active','{}') RETURNING *`,
             [
               uuid(),
               name,
               (body.description as string) ?? null,
-              (body.session_id as string) ?? null,
+              sessionId,
               (body.project_id as string) ?? null,
               JSON.stringify(Array.isArray(body.capabilities) ? body.capabilities : []),
               JSON.stringify(Array.isArray(body.permissions) ? body.permissions : ["*"]),
@@ -1139,7 +1237,15 @@ export function telephonyOpenApi(version: string): Record<string, unknown> {
         Agent: agent,
         AgentInput: {
           type: "object",
-          properties: { name: { type: "string" } },
+          properties: {
+            name: { type: "string" },
+            description: { type: "string", nullable: true },
+            session_id: { type: "string", nullable: true },
+            project_id: { type: "string", nullable: true },
+            capabilities: { type: "array", items: { type: "string" } },
+            permissions: { type: "array", items: { type: "string" } },
+            force: { type: "boolean", description: "Force takeover of a name held by another session" },
+          },
           required: ["name"],
         },
         AgentList: listResponse("Agent"),
@@ -1187,6 +1293,8 @@ export function telephonyOpenApi(version: string): Record<string, unknown> {
             { name: "limit", in: "query", schema: { type: "integer" } },
             { name: "offset", in: "query", schema: { type: "integer" } },
             { name: "search", in: "query", schema: { type: "string" } },
+            { name: "agent_id", in: "query", schema: { type: "string" } },
+            { name: "project_id", in: "query", schema: { type: "string" } },
           ],
           responses: {
             "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/ContactList" } } } },
@@ -1272,6 +1380,10 @@ export function telephonyOpenApi(version: string): Record<string, unknown> {
         get: {
           operationId: "listAgents",
           summary: "List agents",
+          parameters: [
+            { name: "agent_id", in: "query", schema: { type: "string" }, description: "Exact agent id" },
+            { name: "project_id", in: "query", schema: { type: "string" } },
+          ],
           responses: {
             "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/AgentList" } } } },
           },

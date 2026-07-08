@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { getStore, isCloudStore, resetStore, ApiStore, LocalStore } from "./index.js";
+import { HasnaHttpError } from "../../generated/storage-client/index.js";
+import type { Agent, AgentConflictError } from "../../types/index.js";
 
 const CLIENT_ENV = [
   "HASNA_TELEPHONY_STORAGE_MODE",
@@ -109,5 +111,87 @@ describe("ApiStore cloud filters (parity with LocalStore)", () => {
     const call = calls.find((c) => c.resource === "schedules")!;
     // listAll drops undefined keys; enabled must be present as "true".
     expect(call.query).toMatchObject({ agent_id: "a1", project_id: "p1", enabled: "true" });
+  });
+
+  it("forwards project_id to /v1/agents when listing (filter not dropped)", async () => {
+    const { client, calls } = captureClient();
+    const store = new ApiStore(client as never);
+    await store.listAgents("p1");
+    const call = calls.find((c) => c.resource === "agents")!;
+    expect(call.query).toEqual({ project_id: "p1" });
+  });
+});
+
+describe("ApiStore.registerAgent (parity with LocalStore conflict semantics)", () => {
+  const existing: Agent = {
+    id: "ag-1",
+    name: "brutus",
+    description: null,
+    session_id: "sess-A",
+    project_id: null,
+    capabilities: [],
+    permissions: ["*"],
+    status: "active",
+    metadata: {},
+    last_seen_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  it("maps a 409 from the serve route to an AgentConflictError value (not a throw)", async () => {
+    const conflict: AgentConflictError = {
+      error: "conflict",
+      message: `Agent name "brutus" is currently held by an active session`,
+      existing_agent: existing,
+    };
+    const client = {
+      name: "telephony",
+      baseUrl: "https://telephony.hasna.xyz/v1",
+      transport: {} as never,
+      async list() { return { items: [], total: 0, cursor: null, raw: {} }; },
+      async get() { return null; },
+      async create() {
+        throw new HasnaHttpError("POST", "/agents", 409, conflict);
+      },
+      async update() { return {} as never; },
+      async delete() {},
+    };
+    const store = new ApiStore(client as never);
+    const result = await store.registerAgent({ name: "Brutus", session_id: "sess-B" });
+    expect("error" in result && result.error).toBe("conflict");
+    expect((result as AgentConflictError).existing_agent.id).toBe("ag-1");
+  });
+
+  it("re-throws non-409 HTTP errors (does not swallow real failures)", async () => {
+    const client = {
+      name: "telephony",
+      baseUrl: "https://telephony.hasna.xyz/v1",
+      transport: {} as never,
+      async list() { return { items: [], total: 0, cursor: null, raw: {} }; },
+      async get() { return null; },
+      async create() {
+        throw new HasnaHttpError("POST", "/agents", 500, { error: "internal" });
+      },
+      async update() { return {} as never; },
+      async delete() {},
+    };
+    const store = new ApiStore(client as never);
+    await expect(store.registerAgent({ name: "Brutus" })).rejects.toThrow();
+  });
+
+  it("matches agents by name case-insensitively (getAgentByName parity)", async () => {
+    const client = {
+      name: "telephony",
+      baseUrl: "https://telephony.hasna.xyz/v1",
+      transport: {} as never,
+      async list() { return { items: [existing], total: 1, cursor: null, raw: {} }; },
+      async get() { return null; },
+      async create() { return {} as never; },
+      async update() { return {} as never; },
+      async delete() {},
+    };
+    const store = new ApiStore(client as never);
+    const found = await store.getAgentByName("BRUTUS");
+    expect(found?.id).toBe("ag-1");
   });
 });

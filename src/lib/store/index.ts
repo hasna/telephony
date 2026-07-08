@@ -23,6 +23,7 @@
 // There is NO database DSN on the client — the cloud transport is HTTP + key only.
 
 import {
+  HasnaHttpError,
   resolveStorageClient,
   type Env,
   type HasnaStorageClient,
@@ -407,7 +408,19 @@ export class ApiStore implements TelephonyStore {
 
   // Agents
   async registerAgent(input: RegisterAgentInput) {
-    return this.cloud.create<Agent>("agents", input);
+    // Parity with LocalStore.registerAgent: the serve route enforces the same
+    // name-normalization + active-session conflict / force-takeover semantics
+    // and returns the AgentConflictError envelope with a 409 when the name is
+    // held by a live session. Surface that as the conflict value (not a throw)
+    // so CLI/MCP/SDK callers behave identically in local and cloud mode.
+    try {
+      return await this.cloud.create<Agent>("agents", input);
+    } catch (error) {
+      if (error instanceof HasnaHttpError && error.status === 409) {
+        return error.body as AgentConflictError;
+      }
+      throw error;
+    }
   }
   async listAgents(projectId?: string) {
     return this.listAll<Agent>("agents", { project_id: projectId });
@@ -416,8 +429,11 @@ export class ApiStore implements TelephonyStore {
     return this.cloud.get<Agent>("agents", id);
   }
   async getAgentByName(name: string) {
+    // Case-insensitive match, mirroring LocalStore/db.getAgentByName (LOWER(name)).
+    // Agent names are normalized to lowercase at registration, so compare lowered.
+    const target = name.trim().toLowerCase();
     const items = await this.listAll<Agent>("agents");
-    return items.find((a) => a.name === name) ?? null;
+    return items.find((a) => a.name.toLowerCase() === target) ?? null;
   }
   async heartbeat(agentId: string) {
     return this.cloud.update<Agent>("agents", agentId, { status: "active" });

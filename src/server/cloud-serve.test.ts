@@ -248,6 +248,161 @@ describe("telephony cloud serve", () => {
     expect(q.params).toEqual(["ag1", true]);
   });
 
+  it("filters /v1/contacts by agent_id/project_id DB-side (not silently dropped)", async () => {
+    const { deps: d, sql } = capturingDeps();
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    await handler(
+      new Request("http://x/v1/contacts?agent_id=ag1&project_id=pr1", { headers: { "x-api-key": key } }),
+    );
+    const q = sql.find((r) => r.text.startsWith("select * from contacts"))!;
+    expect(q.text).toContain("agent_id = $1");
+    expect(q.text).toContain("project_id = $2");
+    expect(q.params).toEqual(["ag1", "pr1"]);
+  });
+
+  it("filters /v1/agents by project_id DB-side (not silently dropped)", async () => {
+    const { deps: d, sql } = capturingDeps();
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    await handler(new Request("http://x/v1/agents?project_id=pr1", { headers: { "x-api-key": key } }));
+    const q = sql.find((r) => r.text.includes("from agents") && r.text.includes("status != 'archived'"))!;
+    expect(q.text).toContain("project_id = $1");
+    expect(q.params).toEqual(["pr1"]);
+  });
+
+  // ---------------------------------------------------------------------
+  // Parity: POST /v1/agents must replicate LocalStore.registerAgent — name
+  // normalization + active-session conflict / force-takeover semantics.
+  // ---------------------------------------------------------------------
+  function agentRegisterDeps(existing?: Record<string, unknown>): {
+    deps: ServeDeps;
+    sql: { text: string; params: readonly unknown[] }[];
+  } {
+    const sql: { text: string; params: readonly unknown[] }[] = [];
+    const run = (text: string, params: readonly unknown[] = []) => {
+      const s = text.replace(/\s+/g, " ").trim().toLowerCase();
+      if (s.startsWith("select 1")) return { rows: [{ "?column?": 1 }], rowCount: 1 };
+      if (s.includes("from api_keys")) return { rows: [], rowCount: 0 };
+      sql.push({ text: s, params });
+      if (s.includes("from agents where lower(name)")) {
+        return { rows: existing ? [existing] : [], rowCount: existing ? 1 : 0 };
+      }
+      if (s.startsWith("insert into agents")) {
+        return {
+          rows: [
+            {
+              id: params[0],
+              name: params[1],
+              description: params[2] ?? null,
+              session_id: params[3] ?? null,
+              project_id: params[4] ?? null,
+              capabilities: params[5],
+              permissions: params[6],
+              status: "active",
+              metadata: "{}",
+              last_seen_at: new Date(),
+              created_at: new Date(),
+              updated_at: new Date(),
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (s.startsWith("update agents")) return { rows: [existing ?? {}], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    };
+    const client = {
+      async query(t: string, p?: readonly unknown[]) { return run(t, p); },
+      async many(t: string, p?: readonly unknown[]) { return run(t, p).rows; },
+      async get(t: string, p?: readonly unknown[]) { return run(t, p).rows[0] ?? null; },
+      async one(t: string, p?: readonly unknown[]) { return run(t, p).rows[0]; },
+      async execute(t: string, p?: readonly unknown[]) { run(t, p); },
+      pool: {} as never,
+      async transaction<T>(fn: (c: unknown) => Promise<T>) { return fn(client); },
+      async close() {},
+    } as unknown as PoolQueryClient;
+    const store = new ApiKeyStore(client);
+    const verifier = verifyApiKey({ app: "telephony", signingSecret: SIGNING, isRevoked: store.isRevoked });
+    return { deps: { client, verifier, store, version: "9.9.9" }, sql };
+  }
+
+  it("normalizes the agent name to lowercase when registering a new agent", async () => {
+    const { deps: d, sql } = agentRegisterDeps();
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:write"], signingSecret: SIGNING }).token;
+    const res = await handler(
+      new Request("http://x/v1/agents", {
+        method: "POST",
+        headers: { "x-api-key": key, "content-type": "application/json" },
+        body: JSON.stringify({ name: "  Brutus  ", session_id: "sess-A" }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const ins = sql.find((r) => r.text.startsWith("insert into agents"))!;
+    expect(ins.params[1]).toBe("brutus");
+    const body = (await res.json()) as { name: string };
+    expect(body.name).toBe("brutus");
+  });
+
+  it("returns a 409 conflict when the name is held by another active session", async () => {
+    const existing = {
+      id: "ag-1",
+      name: "brutus",
+      description: null,
+      session_id: "sess-A",
+      project_id: null,
+      capabilities: "[]",
+      permissions: '["*"]',
+      status: "active",
+      metadata: "{}",
+      last_seen_at: new Date(), // fresh => not stale
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    const { deps: d } = agentRegisterDeps(existing);
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:write"], signingSecret: SIGNING }).token;
+    const res = await handler(
+      new Request("http://x/v1/agents", {
+        method: "POST",
+        headers: { "x-api-key": key, "content-type": "application/json" },
+        body: JSON.stringify({ name: "Brutus", session_id: "sess-B" }),
+      }),
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string; existing_agent: { id: string } };
+    expect(body.error).toBe("conflict");
+    expect(body.existing_agent.id).toBe("ag-1");
+  });
+
+  it("force-takes over a held name (no conflict) via --force", async () => {
+    const existing = {
+      id: "ag-1",
+      name: "brutus",
+      session_id: "sess-A",
+      capabilities: "[]",
+      permissions: '["*"]',
+      status: "active",
+      metadata: "{}",
+      last_seen_at: new Date(),
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    const { deps: d, sql } = agentRegisterDeps(existing);
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:write"], signingSecret: SIGNING }).token;
+    const res = await handler(
+      new Request("http://x/v1/agents", {
+        method: "POST",
+        headers: { "x-api-key": key, "content-type": "application/json" },
+        body: JSON.stringify({ name: "Brutus", session_id: "sess-B", force: true }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(sql.some((r) => r.text.startsWith("update agents"))).toBe(true);
+  });
+
   it("enforces scopes: a read-only key cannot write", async () => {
     const handler = createServeHandler(deps());
     const roKey = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
