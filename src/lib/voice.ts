@@ -1,5 +1,5 @@
 import { getTwilioClient, getDefaultPhoneNumber } from "./twilio.js";
-import { createCall, updateCallStatus } from "../db/calls.js";
+import { getStore } from "./store/index.js";
 import type { Call } from "../types/index.js";
 
 export async function makeCall(options: {
@@ -12,10 +12,11 @@ export async function makeCall(options: {
   status_callback?: string;
   record?: boolean;
 }): Promise<Call> {
+  const store = getStore();
   const client = getTwilioClient();
   const from = options.from || getDefaultPhoneNumber();
 
-  const call = createCall({
+  const call = await store.createCall({
     direction: "outbound",
     from_number: from,
     to_number: options.to,
@@ -42,11 +43,11 @@ export async function makeCall(options: {
     if (options.record) params.record = true;
 
     const twilioCall = await client.calls.create(params as any);
-    updateCallStatus(call.id, "ringing");
+    await store.updateCallStatus(call.id, "ringing");
 
     return { ...call, status: "ringing", twilio_sid: twilioCall.sid };
   } catch (err: any) {
-    updateCallStatus(call.id, "failed");
+    await store.updateCallStatus(call.id, "failed");
     return { ...call, status: "failed" };
   }
 }
@@ -70,8 +71,8 @@ export interface InboundCallPayload {
   Direction: string;
 }
 
-export function handleInboundCall(payload: InboundCallPayload, agentId?: string, projectId?: string): Call {
-  return createCall({
+export async function handleInboundCall(payload: InboundCallPayload, agentId?: string, projectId?: string): Promise<Call> {
+  return getStore().createCall({
     direction: "inbound",
     from_number: payload.From,
     to_number: payload.To,

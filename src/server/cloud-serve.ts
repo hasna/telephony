@@ -536,18 +536,29 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
       }
 
       // ---- read-only collections ----
-      const listOnly: Record<string, { table: string; order: string; map: (r: Row) => unknown }> = {
-        "/v1/numbers": { table: "phone_numbers", order: "created_at DESC", map: mapNumber },
-        "/v1/messages": { table: "messages", order: "created_at DESC", map: mapMessage },
-        "/v1/calls": { table: "calls", order: "started_at DESC", map: mapCall },
-        "/v1/voicemails": { table: "voicemails", order: "created_at DESC", map: mapVoicemail },
+      const listOnly: Record<string, { table: string; order: string; map: (r: Row) => unknown; filters: string[] }> = {
+        "/v1/numbers": { table: "phone_numbers", order: "created_at DESC", map: mapNumber, filters: ["agent_id", "project_id", "status"] },
+        "/v1/messages": { table: "messages", order: "created_at DESC", map: mapMessage, filters: ["agent_id", "project_id", "type"] },
+        "/v1/calls": { table: "calls", order: "started_at DESC", map: mapCall, filters: ["agent_id", "project_id"] },
+        "/v1/voicemails": { table: "voicemails", order: "created_at DESC", map: mapVoicemail, filters: ["agent_id", "project_id"] },
       };
       if (listOnly[path] && method === "GET") {
         await authOrThrow(req, ["telephony:read"]);
         const spec = listOnly[path]!;
         const limit = clampLimit(url.searchParams.get("limit"));
+        const where: string[] = [];
+        const params: unknown[] = [];
+        for (const col of spec.filters) {
+          const val = url.searchParams.get(col);
+          if (val != null && val !== "") {
+            params.push(val);
+            where.push(`${col} = $${params.length}`);
+          }
+        }
+        const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
         const rows = await db.many<Row>(
-          `SELECT * FROM ${spec.table} ORDER BY ${spec.order} LIMIT ${limit}`,
+          `SELECT * FROM ${spec.table} ${clause} ORDER BY ${spec.order} LIMIT ${limit}`,
+          params,
         );
         return json({ items: rows.map(spec.map), total: rows.length });
       }
@@ -565,6 +576,171 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
           decodeURIComponent(singleMatch[2]!),
         ]);
         return row ? json(spec.map(row)) : json({ error: "not_found" }, 404);
+      }
+
+      // ---- writes for numbers/messages/calls/voicemails ----
+      // ApiStore (client-flip cloud transport) routes provider-side records
+      // (createMessage/updateMessageStatus, createCall/updateCallStatus,
+      // createVoicemail/markVoicemailListened, createPhoneNumber/assign/release)
+      // through these. Requires an ECS redeploy after ship.
+      if (path === "/v1/messages" && method === "POST") {
+        await authOrThrow(req, ["telephony:write"]);
+        const body = await readBody(req);
+        const row = await db.get<Row>(
+          `INSERT INTO messages (id, type, from_number, to_number, body, media_url, status, agent_id, project_id, twilio_sid, metadata)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+          [
+            uuid(),
+            requireString(body, "type"),
+            requireString(body, "from_number"),
+            requireString(body, "to_number"),
+            (body.body as string) ?? null,
+            (body.media_url as string) ?? null,
+            typeof body.status === "string" ? body.status : "queued",
+            (body.agent_id as string) ?? null,
+            (body.project_id as string) ?? null,
+            (body.twilio_sid as string) ?? null,
+            JSON.stringify((body.metadata as Record<string, unknown>) ?? {}),
+          ],
+        );
+        return json(mapMessage(row!), 201);
+      }
+      if (path === "/v1/calls" && method === "POST") {
+        await authOrThrow(req, ["telephony:write"]);
+        const body = await readBody(req);
+        const row = await db.get<Row>(
+          `INSERT INTO calls (id, direction, from_number, to_number, status, agent_id, project_id, twilio_sid, metadata)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+          [
+            uuid(),
+            requireString(body, "direction"),
+            requireString(body, "from_number"),
+            requireString(body, "to_number"),
+            typeof body.status === "string" ? body.status : "initiated",
+            (body.agent_id as string) ?? null,
+            (body.project_id as string) ?? null,
+            (body.twilio_sid as string) ?? null,
+            JSON.stringify((body.metadata as Record<string, unknown>) ?? {}),
+          ],
+        );
+        return json(mapCall(row!), 201);
+      }
+      if (path === "/v1/voicemails" && method === "POST") {
+        await authOrThrow(req, ["telephony:write"]);
+        const body = await readBody(req);
+        const row = await db.get<Row>(
+          `INSERT INTO voicemails (id, call_id, from_number, to_number, recording_url, local_path, transcription, duration, agent_id, project_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+          [
+            uuid(),
+            (body.call_id as string) ?? null,
+            requireString(body, "from_number"),
+            requireString(body, "to_number"),
+            (body.recording_url as string) ?? null,
+            (body.local_path as string) ?? null,
+            (body.transcription as string) ?? null,
+            typeof body.duration === "number" ? body.duration : null,
+            (body.agent_id as string) ?? null,
+            (body.project_id as string) ?? null,
+          ],
+        );
+        return json(mapVoicemail(row!), 201);
+      }
+      if (path === "/v1/numbers" && method === "POST") {
+        await authOrThrow(req, ["telephony:write"]);
+        const body = await readBody(req);
+        const row = await db.get<Row>(
+          `INSERT INTO phone_numbers (id, number, country, capabilities, agent_id, project_id, twilio_sid, friendly_name, status, metadata)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+          [
+            uuid(),
+            requireString(body, "number"),
+            typeof body.country === "string" ? body.country : "US",
+            JSON.stringify(Array.isArray(body.capabilities) ? body.capabilities : ["sms", "voice"]),
+            (body.agent_id as string) ?? null,
+            (body.project_id as string) ?? null,
+            (body.twilio_sid as string) ?? null,
+            (body.friendly_name as string) ?? null,
+            typeof body.status === "string" ? body.status : "active",
+            JSON.stringify((body.metadata as Record<string, unknown>) ?? {}),
+          ],
+        );
+        return json(mapNumber(row!), 201);
+      }
+      const writeSingle = path.match(/^\/v1\/(numbers|messages|calls|voicemails)\/([^/]+)$/);
+      if (writeSingle && method === "PATCH") {
+        await authOrThrow(req, ["telephony:write"]);
+        const resource = writeSingle[1]!;
+        const id = decodeURIComponent(writeSingle[2]!);
+        const body = await readBody(req);
+        const table = singleGet[resource]!.table;
+        const mapper = singleGet[resource]!.map;
+        const allowed: Record<string, string[]> = {
+          messages: ["status", "error_message", "twilio_sid"],
+          calls: ["status", "duration", "recording_url", "transcription", "ended_at", "twilio_sid"],
+          voicemails: ["listened", "transcription", "local_path"],
+          numbers: ["agent_id", "project_id", "status", "friendly_name"],
+        };
+        const sets: string[] = [];
+        const params: unknown[] = [];
+        for (const col of allowed[resource]!) {
+          if (body[col] !== undefined) {
+            params.push(body[col]);
+            sets.push(`${col} = $${params.length}`);
+          }
+        }
+        if (sets.length === 0) {
+          const row = await db.get<Row>(`SELECT * FROM ${table} WHERE id = $1`, [id]);
+          return row ? json(mapper(row)) : json({ error: "not_found" }, 404);
+        }
+        // calls/voicemails have no updated_at column; only bump it where present.
+        if (resource === "messages" || resource === "numbers") sets.push(`updated_at = NOW()`);
+        params.push(id);
+        const row = await db.get<Row>(
+          `UPDATE ${table} SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
+          params,
+        );
+        return row ? json(mapper(row)) : json({ error: "not_found" }, 404);
+      }
+
+      // ---- /v1/agents/:id (heartbeat / release / focus) ----
+      const agentPatch = path.match(/^\/v1\/agents\/([^/]+)$/);
+      if (agentPatch && method === "PATCH") {
+        await authOrThrow(req, ["telephony:write"]);
+        const id = decodeURIComponent(agentPatch[1]!);
+        const body = await readBody(req);
+        const sets: string[] = [];
+        const params: unknown[] = [];
+        for (const col of ["status", "project_id", "description"]) {
+          if (body[col] !== undefined) {
+            params.push(body[col]);
+            sets.push(`${col} = $${params.length}`);
+          }
+        }
+        // Any PATCH is treated as liveness — bump last_seen_at + updated_at.
+        sets.push(`last_seen_at = NOW()`, `updated_at = NOW()`);
+        params.push(id);
+        const row = await db.get<Row>(
+          `UPDATE agents SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
+          params,
+        );
+        return row ? json(mapAgent(row)) : json({ error: "not_found" }, 404);
+      }
+
+      // ---- /v1/feedback ----
+      if (path === "/v1/feedback" && method === "POST") {
+        await authOrThrow(req, ["telephony:write"]);
+        const body = await readBody(req);
+        await db.query(
+          `INSERT INTO feedback (message, email, category, version) VALUES ($1,$2,$3,$4)`,
+          [
+            requireString(body, "message"),
+            (body.email as string) ?? null,
+            typeof body.category === "string" ? body.category : "general",
+            (body.version as string) ?? null,
+          ],
+        );
+        return json({ status: "ok" }, 201);
       }
 
       // ---- /v1/schedules ----
@@ -600,12 +776,42 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
         return json({ error: "method_not_allowed" }, 405);
       }
       const scheduleMatch = path.match(/^\/v1\/schedules\/([^/]+)$/);
-      if (scheduleMatch && method === "GET") {
-        await authOrThrow(req, ["telephony:read"]);
-        const row = await db.get<Row>(`SELECT * FROM schedules WHERE id = $1`, [
-          decodeURIComponent(scheduleMatch[1]!),
-        ]);
-        return row ? json(mapSchedule(row)) : json({ error: "not_found" }, 404);
+      if (scheduleMatch) {
+        const id = decodeURIComponent(scheduleMatch[1]!);
+        if (method === "GET") {
+          await authOrThrow(req, ["telephony:read"]);
+          const row = await db.get<Row>(`SELECT * FROM schedules WHERE id = $1`, [id]);
+          return row ? json(mapSchedule(row)) : json({ error: "not_found" }, 404);
+        }
+        if (method === "PATCH") {
+          await authOrThrow(req, ["telephony:write"]);
+          const body = await readBody(req);
+          const sets: string[] = [];
+          const params: unknown[] = [];
+          for (const col of ["enabled", "last_run", "next_run", "run_count"]) {
+            if (body[col] !== undefined) {
+              params.push(body[col]);
+              sets.push(`${col} = $${params.length}`);
+            }
+          }
+          if (sets.length === 0) {
+            const row = await db.get<Row>(`SELECT * FROM schedules WHERE id = $1`, [id]);
+            return row ? json(mapSchedule(row)) : json({ error: "not_found" }, 404);
+          }
+          sets.push(`updated_at = NOW()`);
+          params.push(id);
+          const row = await db.get<Row>(
+            `UPDATE schedules SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
+            params,
+          );
+          return row ? json(mapSchedule(row)) : json({ error: "not_found" }, 404);
+        }
+        if (method === "DELETE") {
+          await authOrThrow(req, ["telephony:write"]);
+          const result = await db.query(`DELETE FROM schedules WHERE id = $1`, [id]);
+          return result.rowCount > 0 ? new Response(null, { status: 204 }) : json({ error: "not_found" }, 404);
+        }
+        return json({ error: "method_not_allowed" }, 405);
       }
 
       // ---- /v1/webhooks ----
@@ -633,12 +839,19 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
         return json({ error: "method_not_allowed" }, 405);
       }
       const webhookMatch = path.match(/^\/v1\/webhooks\/([^/]+)$/);
-      if (webhookMatch && method === "GET") {
-        await authOrThrow(req, ["telephony:read"]);
-        const row = await db.get<Row>(`SELECT * FROM webhooks WHERE id = $1`, [
-          decodeURIComponent(webhookMatch[1]!),
-        ]);
-        return row ? json(mapWebhook(row)) : json({ error: "not_found" }, 404);
+      if (webhookMatch) {
+        const id = decodeURIComponent(webhookMatch[1]!);
+        if (method === "GET") {
+          await authOrThrow(req, ["telephony:read"]);
+          const row = await db.get<Row>(`SELECT * FROM webhooks WHERE id = $1`, [id]);
+          return row ? json(mapWebhook(row)) : json({ error: "not_found" }, 404);
+        }
+        if (method === "DELETE") {
+          await authOrThrow(req, ["telephony:write"]);
+          const result = await db.query(`DELETE FROM webhooks WHERE id = $1`, [id]);
+          return result.rowCount > 0 ? new Response(null, { status: 204 }) : json({ error: "not_found" }, 404);
+        }
+        return json({ error: "method_not_allowed" }, 405);
       }
 
       return json({ error: "not_found", path }, 404);

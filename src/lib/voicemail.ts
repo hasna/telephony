@@ -1,4 +1,4 @@
-import { createVoicemail, listVoicemails, markVoicemailListened } from "../db/voicemails.js";
+import { getStore } from "./store/index.js";
 import { generateSpeech } from "./tts.js";
 import { transcribeUrl } from "./stt.js";
 import { saveAudio, generateAudioFilename, getAudioDir } from "./audio.js";
@@ -56,7 +56,7 @@ export async function handleVoicemailRecording(options: {
     transcription = result.text;
   } catch {}
 
-  return createVoicemail({
+  return getStore().createVoicemail({
     call_id: options.call_id,
     from_number: options.from_number,
     to_number: options.to_number,

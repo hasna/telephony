@@ -1,5 +1,5 @@
-import { getTwilioClient, getDefaultPhoneNumber } from "./twilio.js";
-import { createPhoneNumber, releasePhoneNumberDb, deletePhoneNumber, getPhoneNumberByNumber } from "../db/phone-numbers.js";
+import { getTwilioClient } from "./twilio.js";
+import { getStore } from "./store/index.js";
 import type { PhoneNumber, PhoneNumberCapability } from "../types/index.js";
 
 export interface AvailableNumber {
@@ -63,7 +63,7 @@ export async function provisionNumber(options: {
   if (incoming.capabilities.sms) capabilities.push("sms");
   if (incoming.capabilities.mms) capabilities.push("mms");
 
-  return createPhoneNumber({
+  return getStore().createPhoneNumber({
     number: incoming.phoneNumber,
     country: (incoming as any).isoCountry || "US",
     capabilities,
@@ -75,9 +75,10 @@ export async function provisionNumber(options: {
 }
 
 export async function releaseNumber(numberOrId: string): Promise<boolean> {
+  const store = getStore();
   const client = getTwilioClient();
 
-  const record = getPhoneNumberByNumber(numberOrId);
+  const record = await store.getPhoneNumberByNumber(numberOrId);
   const sid = record?.twilio_sid;
 
   if (sid) {
@@ -85,7 +86,7 @@ export async function releaseNumber(numberOrId: string): Promise<boolean> {
   }
 
   if (record) {
-    releasePhoneNumberDb(record.id);
+    await store.releasePhoneNumber(record.id);
   }
 
   return true;

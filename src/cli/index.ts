@@ -2,22 +2,11 @@
 import { registerEventsCommands } from "@hasna/events/commander";
 import { Command } from "commander";
 import pkg from "../../package.json";
-import { getDatabase } from "../db/database.js";
-// Client storage resolver / facade: routes reads+writes to the cloud /v1 API
-// when HASNA_TELEPHONY_STORAGE_MODE=self_hosted + API_URL + API_KEY are set,
-// otherwise to the on-box SQLite store. See ../cloud/store.ts.
-import {
-  isCloud,
-  registerAgent, listAgents, heartbeat, releaseAgent, getAgent, getAgentByName,
-  createProject, listProjects, getProject, deleteProject,
-  listPhoneNumbers, assignPhoneNumber,
-  listMessages, searchMessages, getConversation,
-  listCalls,
-  listVoicemails, markVoicemailListened,
-  createContact, listContacts, searchContacts, deleteContact,
-  createSchedule, listSchedules, enableSchedule, disableSchedule, deleteSchedule,
-  createWebhook, listWebhooks, deleteWebhook,
-} from "../cloud/store.js";
+// The single Store abstraction: routes every read+write to the cloud /v1 API
+// when HASNA_TELEPHONY_STORAGE_MODE=self_hosted (or cloud) + API_URL + API_KEY
+// are set, otherwise to the on-box SQLite store. No CLI command touches sqlite
+// or fetch directly. See ../lib/store/index.ts.
+import { getStore } from "../lib/store/index.js";
 import { sendSms } from "../lib/sms.js";
 import { sendWhatsApp, sendWhatsAppAudio } from "../lib/whatsapp.js";
 import { makeCall } from "../lib/voice.js";
@@ -28,10 +17,6 @@ import { generateSchedule, generateMessage } from "../lib/cerebras.js";
 import { setGreeting } from "../lib/voicemail.js";
 import { tick } from "../lib/scheduler.js";
 import { getConfig } from "../lib/config.js";
-
-// Ensure the local DB is initialized — but only in local mode. In cloud
-// (self_hosted) mode we must never touch the on-box SQLite store.
-if (!isCloud()) getDatabase();
 
 const program = new Command();
 program
@@ -64,7 +49,7 @@ smsCmd
   .option("--project <id>", "Filter by project")
   .option("--limit <n>", "Limit results", "50")
   .action(async (opts) => {
-    const msgs = await listMessages({ agent_id: opts.agent, project_id: opts.project, limit: parseInt(opts.limit) });
+    const msgs = await getStore().listMessages({ agent_id: opts.agent, project_id: opts.project, limit: parseInt(opts.limit) });
     console.log(JSON.stringify(msgs, null, 2));
   });
 
@@ -73,7 +58,7 @@ smsCmd
   .description("Search messages")
   .option("--limit <n>", "Limit results", "50")
   .action(async (query, opts) => {
-    const msgs = await searchMessages(query, parseInt(opts.limit));
+    const msgs = await getStore().searchMessages(query, parseInt(opts.limit));
     console.log(JSON.stringify(msgs, null, 2));
   });
 
@@ -112,7 +97,7 @@ waCmd
   .option("--agent <id>", "Filter by agent")
   .option("--limit <n>", "Limit", "50")
   .action(async (opts) => {
-    const msgs = await listMessages({ agent_id: opts.agent, type: "whatsapp_outbound", limit: parseInt(opts.limit) });
+    const msgs = await getStore().listMessages({ agent_id: opts.agent, type: "whatsapp_outbound", limit: parseInt(opts.limit) });
     console.log(JSON.stringify(msgs, null, 2));
   });
 
@@ -139,7 +124,7 @@ callCmd
   .option("--agent <id>", "Filter by agent")
   .option("--limit <n>", "Limit", "50")
   .action(async (opts) => {
-    const calls = await listCalls({ agent_id: opts.agent, limit: parseInt(opts.limit) });
+    const calls = await getStore().listCalls({ agent_id: opts.agent, limit: parseInt(opts.limit) });
     console.log(JSON.stringify(calls, null, 2));
   });
 
@@ -154,7 +139,7 @@ vmCmd
   .option("--agent <id>", "Filter by agent")
   .option("--unheard", "Only unheard")
   .action(async (opts) => {
-    const vms = await listVoicemails({ agent_id: opts.agent, listened: opts.unheard ? false : undefined });
+    const vms = await getStore().listVoicemails({ agent_id: opts.agent, listened: opts.unheard ? false : undefined });
     console.log(JSON.stringify(vms, null, 2));
   });
 
@@ -162,7 +147,7 @@ vmCmd
   .command("listen <id>")
   .description("Mark voicemail as listened")
   .action(async (id) => {
-    await markVoicemailListened(id);
+    await getStore().markVoicemailListened(id);
     console.log("Marked as listened.");
   });
 
@@ -218,7 +203,7 @@ numCmd
   .option("--agent <id>", "Filter by agent")
   .option("--project <id>", "Filter by project")
   .action(async (opts) => {
-    const numbers = await listPhoneNumbers({ agent_id: opts.agent, project_id: opts.project });
+    const numbers = await getStore().listPhoneNumbers({ agent_id: opts.agent, project_id: opts.project });
     console.log(JSON.stringify(numbers, null, 2));
   });
 
@@ -228,7 +213,7 @@ numCmd
   .option("--agent <id>", "Agent ID")
   .option("--project <id>", "Project ID")
   .action(async (id, opts) => {
-    await assignPhoneNumber(id, opts.agent, opts.project);
+    await getStore().assignPhoneNumber(id, opts.agent, opts.project);
     console.log("Number assigned.");
   });
 
@@ -264,7 +249,7 @@ agentCmd
   .option("--project <id>", "Project ID")
   .option("--force", "Force takeover")
   .action(async (opts) => {
-    const result = await registerAgent({ name: opts.name, description: opts.description, project_id: opts.project, force: opts.force });
+    const result = await getStore().registerAgent({ name: opts.name, description: opts.description, project_id: opts.project, force: opts.force });
     console.log(JSON.stringify(result, null, 2));
   });
 
@@ -273,7 +258,7 @@ agentCmd
   .description("List agents")
   .option("--project <id>", "Filter by project")
   .action(async (opts) => {
-    const agents = await listAgents(opts.project);
+    const agents = await getStore().listAgents(opts.project);
     console.log(JSON.stringify(agents, null, 2));
   });
 
@@ -281,7 +266,7 @@ agentCmd
   .command("get <id>")
   .description("Get agent details")
   .action(async (id) => {
-    const agent = (await getAgent(id)) || (await getAgentByName(id));
+    const agent = (await getStore().getAgent(id)) || (await getStore().getAgentByName(id));
     console.log(JSON.stringify(agent, null, 2));
   });
 
@@ -289,7 +274,7 @@ agentCmd
   .command("heartbeat <id>")
   .description("Send agent heartbeat")
   .action(async (id) => {
-    const agent = await heartbeat(id);
+    const agent = await getStore().heartbeat(id);
     console.log(JSON.stringify(agent, null, 2));
   });
 
@@ -297,7 +282,7 @@ agentCmd
   .command("release <id>")
   .description("Release an agent")
   .action(async (id) => {
-    await releaseAgent(id);
+    await getStore().releaseAgent(id);
     console.log("Agent released.");
   });
 
@@ -313,7 +298,7 @@ projCmd
   .requiredOption("--path <path>", "Project path")
   .option("--description <desc>", "Description")
   .action(async (opts) => {
-    const proj = await createProject({ name: opts.name, path: opts.path, description: opts.description });
+    const proj = await getStore().createProject({ name: opts.name, path: opts.path, description: opts.description });
     console.log(JSON.stringify(proj, null, 2));
   });
 
@@ -321,21 +306,21 @@ projCmd
   .command("list")
   .description("List projects")
   .action(async () => {
-    console.log(JSON.stringify(await listProjects(), null, 2));
+    console.log(JSON.stringify(await getStore().listProjects(), null, 2));
   });
 
 projCmd
   .command("get <id>")
   .description("Get project details")
   .action(async (id) => {
-    console.log(JSON.stringify(await getProject(id), null, 2));
+    console.log(JSON.stringify(await getStore().getProject(id), null, 2));
   });
 
 projCmd
   .command("delete <id>")
   .description("Delete a project")
   .action(async (id) => {
-    await deleteProject(id);
+    await getStore().deleteProject(id);
     console.log("Project deleted.");
   });
 
@@ -354,7 +339,7 @@ schedCmd
   .option("--agent <id>", "Agent ID")
   .option("--project <id>", "Project ID")
   .action(async (opts) => {
-    const sched = await createSchedule({
+    const sched = await getStore().createSchedule({
       name: opts.name,
       cron_expression: opts.cron,
       action: opts.action,
@@ -372,7 +357,7 @@ schedCmd
   .action(async (description, opts) => {
     const parsed = await generateSchedule(description);
     console.log("AI parsed schedule:", JSON.stringify(parsed, null, 2));
-    const sched = await createSchedule({
+    const sched = await getStore().createSchedule({
       name: parsed.description,
       cron_expression: parsed.cron_expression,
       action: parsed.action as any,
@@ -388,20 +373,20 @@ schedCmd
   .description("List schedules")
   .option("--agent <id>", "Filter by agent")
   .action(async (opts) => {
-    console.log(JSON.stringify(await listSchedules({ agent_id: opts.agent }), null, 2));
+    console.log(JSON.stringify(await getStore().listSchedules({ agent_id: opts.agent }), null, 2));
   });
 
 schedCmd
   .command("enable <id>")
-  .action(async (id) => { await enableSchedule(id); console.log("Enabled."); });
+  .action(async (id) => { await getStore().enableSchedule(id); console.log("Enabled."); });
 
 schedCmd
   .command("disable <id>")
-  .action(async (id) => { await disableSchedule(id); console.log("Disabled."); });
+  .action(async (id) => { await getStore().disableSchedule(id); console.log("Disabled."); });
 
 schedCmd
   .command("delete <id>")
-  .action(async (id) => { await deleteSchedule(id); console.log("Deleted."); });
+  .action(async (id) => { await getStore().deleteSchedule(id); console.log("Deleted."); });
 
 schedCmd
   .command("run")
@@ -457,7 +442,7 @@ contactCmd
   .option("--agent <id>", "Agent ID")
   .option("--notes <text>", "Notes")
   .action(async (opts) => {
-    const c = await createContact({ name: opts.name, phone: opts.phone, email: opts.email, agent_id: opts.agent, notes: opts.notes });
+    const c = await getStore().createContact({ name: opts.name, phone: opts.phone, email: opts.email, agent_id: opts.agent, notes: opts.notes });
     console.log(JSON.stringify(c, null, 2));
   });
 
@@ -465,18 +450,18 @@ contactCmd
   .command("list")
   .option("--agent <id>", "Filter by agent")
   .action(async (opts) => {
-    console.log(JSON.stringify(await listContacts({ agent_id: opts.agent }), null, 2));
+    console.log(JSON.stringify(await getStore().listContacts({ agent_id: opts.agent }), null, 2));
   });
 
 contactCmd
   .command("search <query>")
   .action(async (query) => {
-    console.log(JSON.stringify(await searchContacts(query), null, 2));
+    console.log(JSON.stringify(await getStore().searchContacts(query), null, 2));
   });
 
 contactCmd
   .command("delete <id>")
-  .action(async (id) => { await deleteContact(id); console.log("Deleted."); });
+  .action(async (id) => { await getStore().deleteContact(id); console.log("Deleted."); });
 
 // ---------------------------------------------------------------------------
 // Webhooks
@@ -489,12 +474,12 @@ whCmd
   .option("--events <events>", "Comma-separated events")
   .option("--secret <secret>", "Signing secret")
   .action(async (opts) => {
-    const wh = await createWebhook({ url: opts.url, events: opts.events?.split(","), secret: opts.secret });
+    const wh = await getStore().createWebhook({ url: opts.url, events: opts.events?.split(","), secret: opts.secret });
     console.log(JSON.stringify(wh, null, 2));
   });
 
-whCmd.command("list").action(async () => { console.log(JSON.stringify(await listWebhooks(), null, 2)); });
-whCmd.command("delete <id>").action(async (id) => { await deleteWebhook(id); console.log("Deleted."); });
+whCmd.command("list").action(async () => { console.log(JSON.stringify(await getStore().listWebhooks(), null, 2)); });
+whCmd.command("delete <id>").action(async (id) => { await getStore().deleteWebhook(id); console.log("Deleted."); });
 
 // ---------------------------------------------------------------------------
 // AI Message Generation
@@ -518,7 +503,7 @@ program
   .description("View conversation with a phone number")
   .option("--limit <n>", "Limit", "50")
   .action(async (phone, opts) => {
-    const msgs = await getConversation(phone, parseInt(opts.limit));
+    const msgs = await getStore().getConversation(phone, parseInt(opts.limit));
     console.log(JSON.stringify(msgs, null, 2));
   });
 

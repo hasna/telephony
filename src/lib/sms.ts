@@ -1,5 +1,5 @@
 import { getTwilioClient, getDefaultPhoneNumber } from "./twilio.js";
-import { createMessage, updateMessageStatus } from "../db/messages.js";
+import { getStore } from "./store/index.js";
 import type { Message } from "../types/index.js";
 
 export async function sendSms(options: {
@@ -10,11 +10,12 @@ export async function sendSms(options: {
   project_id?: string;
   status_callback?: string;
 }): Promise<Message> {
+  const store = getStore();
   const client = getTwilioClient();
   const from = options.from || getDefaultPhoneNumber();
 
-  // Create DB record first
-  const msg = createMessage({
+  // Record the outbound message through the Store first (local or cloud).
+  const msg = await store.createMessage({
     type: "sms_outbound",
     from_number: from,
     to_number: options.to,
@@ -34,10 +35,10 @@ export async function sendSms(options: {
 
     const twilioMsg = await client.messages.create(params as any);
 
-    updateMessageStatus(msg.id, "sent");
+    await store.updateMessageStatus(msg.id, "sent");
     return { ...msg, status: "sent", twilio_sid: twilioMsg.sid };
   } catch (err: any) {
-    updateMessageStatus(msg.id, "failed", err.message);
+    await store.updateMessageStatus(msg.id, "failed", err.message);
     return { ...msg, status: "failed", error_message: err.message };
   }
 }
@@ -51,8 +52,8 @@ export interface InboundSmsPayload {
   MediaUrl0?: string;
 }
 
-export function handleInboundSms(payload: InboundSmsPayload, agentId?: string, projectId?: string): Message {
-  return createMessage({
+export async function handleInboundSms(payload: InboundSmsPayload, agentId?: string, projectId?: string): Promise<Message> {
+  return getStore().createMessage({
     type: "sms_inbound",
     from_number: payload.From,
     to_number: payload.To,

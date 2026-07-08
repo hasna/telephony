@@ -2,8 +2,6 @@ import { handleInboundSms } from "../lib/sms.js";
 import { handleInboundWhatsApp } from "../lib/whatsapp.js";
 import { handleInboundCall } from "../lib/voice.js";
 import { handleVoicemailRecording } from "../lib/voicemail.js";
-import { updateCallStatus } from "../db/calls.js";
-import { updateMessageStatus } from "../db/messages.js";
 import { dispatchWebhook } from "../db/webhooks.js";
 
 export function parseFormBody(body: string): Record<string, string> {
@@ -16,7 +14,7 @@ export function parseFormBody(body: string): Record<string, string> {
 
 export async function handleSmsWebhook(body: string): Promise<string> {
   const params = parseFormBody(body);
-  const msg = handleInboundSms({
+  const msg = await handleInboundSms({
     MessageSid: params.MessageSid || "",
     From: params.From || "",
     To: params.To || "",
@@ -32,7 +30,7 @@ export async function handleSmsWebhook(body: string): Promise<string> {
 
 export async function handleWhatsAppWebhook(body: string): Promise<string> {
   const params = parseFormBody(body);
-  const msg = handleInboundWhatsApp({
+  const msg = await handleInboundWhatsApp({
     MessageSid: params.MessageSid || "",
     From: params.From || "",
     To: params.To || "",
@@ -49,7 +47,7 @@ export async function handleWhatsAppWebhook(body: string): Promise<string> {
 
 export async function handleVoiceWebhook(body: string): Promise<string> {
   const params = parseFormBody(body);
-  const call = handleInboundCall({
+  const call = await handleInboundCall({
     CallSid: params.CallSid || "",
     From: params.From || "",
     To: params.To || "",
