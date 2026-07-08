@@ -4,6 +4,28 @@ interface CerebrasResponse {
   choices: Array<{ message: { content: string } }>;
 }
 
+/**
+ * The Cerebras chat model. Overridable via CEREBRAS_MODEL / HASNA_CEREBRAS_MODEL
+ * so a model retirement never hard-bricks ai-message / schedule-ai / ai-analyze
+ * again. The default is a currently-served, generally-available Cerebras model
+ * (the former `llama-4-scout-17b-16e-instruct` was retired and 404'd every call).
+ */
+export const DEFAULT_CEREBRAS_MODEL = "gpt-oss-120b";
+
+export function resolveModel(): string {
+  const raw = process.env.CEREBRAS_MODEL ?? process.env.HASNA_CEREBRAS_MODEL;
+  const trimmed = raw?.trim();
+  if (!trimmed) return DEFAULT_CEREBRAS_MODEL;
+  // Strip a single pair of wrapping quotes (fleet machines sometimes store env
+  // values quoted), mirroring config.env().
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if (trimmed.length >= 2 && (first === '"' || first === "'") && last === first) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
 async function cerebrasChat(systemPrompt: string, userPrompt: string): Promise<string> {
   const apiKey = requireConfig("cerebras_api_key");
 
@@ -14,7 +36,7 @@ async function cerebrasChat(systemPrompt: string, userPrompt: string): Promise<s
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-4-scout-17b-16e-instruct",
+      model: resolveModel(),
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
