@@ -7,6 +7,7 @@ import pkg from "../../package.json";
 // are set, otherwise to the on-box SQLite store. No CLI command touches sqlite
 // or fetch directly. See ../lib/store/index.ts.
 import { getStore } from "../lib/store/index.js";
+import { HasnaHttpError } from "../generated/storage-client/index.js";
 import { sendSms } from "../lib/sms.js";
 import { sendWhatsApp, sendWhatsAppAudio } from "../lib/whatsapp.js";
 import { makeCall } from "../lib/voice.js";
@@ -538,4 +539,36 @@ program
   });
 registerEventsCommands(program, { source: "telephony" });
 
-program.parse();
+// ---------------------------------------------------------------------------
+// Graceful top-level error handling
+// ---------------------------------------------------------------------------
+// Every command action is async; `parseAsync` surfaces a rejected action as a
+// rejected promise so we can print a clean, one-line diagnostic instead of a
+// raw Bun/Node stack trace. This is what turns a dead-upstream provider call
+// (e.g. the server's Twilio credential being rejected → 502 twilio_error) or a
+// missing local credential into an actionable message rather than a crash dump.
+// Never prints secret values — only the provider/HTTP error code + message.
+function formatCliError(err: unknown): string {
+  if (err instanceof HasnaHttpError) {
+    const body = err.body as { error?: string; message?: string } | null;
+    const detail =
+      body && (body.message || body.error)
+        ? `${body.error ?? "error"}${body.message ? `: ${body.message}` : ""}`
+        : err.message;
+    return `telephony: cloud request failed (HTTP ${err.status}): ${detail}`;
+  }
+  if (err && typeof err === "object") {
+    const e = err as { status?: number; code?: number | string; message?: string };
+    // Twilio REST exceptions (local mode direct provider call) carry code+status.
+    if (e.code !== undefined && e.status !== undefined && e.message) {
+      return `telephony: Twilio error ${e.code} (HTTP ${e.status}): ${e.message}`;
+    }
+    if (typeof e.message === "string" && e.message) return `telephony: ${e.message}`;
+  }
+  return `telephony: ${String(err)}`;
+}
+
+program.parseAsync().catch((err) => {
+  console.error(formatCliError(err));
+  process.exitCode = 1;
+});
