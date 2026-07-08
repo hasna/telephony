@@ -31,20 +31,3 @@ export function deleteWebhook(id: string, db?: Database): boolean {
   const d = db || getDatabase();
   return d.run("DELETE FROM webhooks WHERE id = ?", [id]).changes > 0;
 }
-
-export async function dispatchWebhook(event: string, payload: unknown, db?: Database): Promise<void> {
-  const webhooks = listWebhooks(db).filter(w => w.active && (w.events.length === 0 || w.events.includes(event)));
-  for (const wh of webhooks) {
-    try {
-      const body = JSON.stringify({ event, payload, timestamp: now() });
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (wh.secret) {
-        const encoder = new TextEncoder();
-        const key = await crypto.subtle.importKey("raw", encoder.encode(wh.secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-        const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
-        headers["X-Webhook-Signature"] = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
-      }
-      fetch(wh.url, { method: "POST", headers, body }).catch(() => {});
-    } catch {}
-  }
-}

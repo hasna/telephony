@@ -400,3 +400,54 @@ describe("REST and Twilio safety gates", () => {
     expect(listMessages()).toHaveLength(1);
   });
 });
+
+describe("cloud-flip read routing", () => {
+  const apiUrlEnv = ["HASNA", "TELEPHONY", "API", "URL"].join("_");
+  const apiKeyEnv = ["HASNA", "TELEPHONY", "API", "KEY"].join("_");
+
+  it("serves REST read routes from the Store (cloud) — not local sqlite — when flipped", async () => {
+    // A machine flipped to cloud runs `telephony serve` as a webhook receiver +
+    // dashboard. Its read routes MUST come from the SAME cloud store the inbound
+    // handlers write to; reading local sqlite here is the split-brain bug.
+    const seenPaths: string[] = [];
+    const cloud = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const u = new URL(req.url);
+        seenPaths.push(`${req.method} ${u.pathname}`);
+        if (req.method === "GET" && u.pathname === "/v1/messages") {
+          return new Response(JSON.stringify({ items: [{ id: "cloud-msg-1", body: "from cloud" }] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ items: [] }), { headers: { "Content-Type": "application/json" } });
+      },
+    });
+
+    // Isolated (empty) local DB so any accidental local read would return [].
+    tempDir = mkdtempSync(join(tmpdir(), "telephony-server-test-"));
+    process.env.HASNA_TELEPHONY_DB_PATH = join(tempDir, "telephony.db");
+    Object.assign(process.env, { [restCredentialEnvName]: restCredential() });
+    process.env[apiUrlEnv] = `http://127.0.0.1:${cloud.port}`;
+    process.env[apiKeyEnv] = ["test", "cloud", "key"].join("-");
+
+    const { resetStore } = await import("../lib/store/index.js");
+    resetStore();
+
+    try {
+      const { createServer } = await import("./serve.js");
+      server = createServer(0);
+
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/messages`, { headers: authHeaders() });
+      expect(res.status).toBe(200);
+      // The row came from the cloud stub, proving the read routed through the Store.
+      expect(await res.json()).toEqual([{ id: "cloud-msg-1", body: "from cloud" }]);
+      expect(seenPaths).toContain("GET /v1/messages");
+    } finally {
+      cloud.stop(true);
+      delete process.env[apiUrlEnv];
+      delete process.env[apiKeyEnv];
+      resetStore();
+    }
+  });
+});

@@ -1,20 +1,10 @@
 import pkg from "../../package.json";
-import { getDatabase } from "../db/database.js";
-import { registerAgent, listAgents, heartbeat, getAgent } from "../db/agents.js";
-import { createProject, listProjects, getProject, deleteProject } from "../db/projects.js";
-import { listPhoneNumbers, assignPhoneNumber } from "../db/phone-numbers.js";
-import { listMessages, searchMessages, getConversation } from "../db/messages.js";
-import { listCalls } from "../db/calls.js";
-import { listVoicemails } from "../db/voicemails.js";
-import { createContact, listContacts, searchContacts } from "../db/contacts.js";
-import { createSchedule, listSchedules } from "../db/schedules.js";
-import { createWebhook, listWebhooks } from "../db/webhooks.js";
+import { getStore } from "../lib/store/index.js";
 import { sendSms } from "../lib/sms.js";
 import { sendWhatsApp, sendWhatsAppAudio } from "../lib/whatsapp.js";
 import { makeCall } from "../lib/voice.js";
 import { searchAvailableNumbers, provisionNumber, releaseNumber } from "../lib/provisioning.js";
 import { generateSpeech, listVoices } from "../lib/tts.js";
-import { transcribe } from "../lib/stt.js";
 import { generateSchedule, generateMessage, analyzeIncomingMessage } from "../lib/cerebras.js";
 import { startScheduler } from "../lib/scheduler.js";
 import {
@@ -37,9 +27,6 @@ import {
 } from "./webhooks.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-
-// Ensure DB
-getDatabase();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -176,18 +163,18 @@ export function createServer(port: number = 19451) {
           if (safetyGate) return safetyGate;
           return json(await makeCall(body as any));
         }
-        if (path === "/api/messages") return json(listMessages({ limit: 50 }));
+        if (path === "/api/messages") return json(await getStore().listMessages({ limit: 50 }));
         if (path === "/api/messages/search") {
           const q = url.searchParams.get("q") || "";
-          return json(searchMessages(q));
+          return json(await getStore().searchMessages(q));
         }
         if (path.startsWith("/api/conversation/")) {
           const phone = decodeURIComponent(path.slice("/api/conversation/".length));
-          return json(getConversation(phone));
+          return json(await getStore().getConversation(phone));
         }
-        if (path === "/api/calls") return json(listCalls());
-        if (path === "/api/voicemails") return json(listVoicemails());
-        if (path === "/api/numbers") return json(listPhoneNumbers());
+        if (path === "/api/calls") return json(await getStore().listCalls());
+        if (path === "/api/voicemails") return json(await getStore().listVoicemails());
+        if (path === "/api/numbers") return json(await getStore().listPhoneNumbers());
         if (path === "/api/numbers/search" && req.method === "POST") {
           const body = await parseBody(req);
           validateProvisioningCountry(body.country);
@@ -219,42 +206,42 @@ export function createServer(port: number = 19451) {
           const body = await parseBody(req);
           return telephonyProviderSmoke(req, body);
         }
-        if (path === "/api/agents" && req.method === "GET") return json(listAgents());
+        if (path === "/api/agents" && req.method === "GET") return json(await getStore().listAgents());
         if (path === "/api/agents/register" && req.method === "POST") {
           const body = await parseBody(req);
-          return json(registerAgent(body as any));
+          return json(await getStore().registerAgent(body as any));
         }
         if (path === "/api/agents/heartbeat" && req.method === "POST") {
           const body = await parseBody(req);
-          return json(heartbeat(body.agent_id as string));
+          return json(await getStore().heartbeat(body.agent_id as string));
         }
-        if (path === "/api/projects" && req.method === "GET") return json(listProjects());
+        if (path === "/api/projects" && req.method === "GET") return json(await getStore().listProjects());
         if (path === "/api/projects" && req.method === "POST") {
           const body = await parseBody(req);
-          return json(createProject(body as any));
+          return json(await getStore().createProject(body as any));
         }
-        if (path === "/api/contacts" && req.method === "GET") return json(listContacts());
+        if (path === "/api/contacts" && req.method === "GET") return json(await getStore().listContacts());
         if (path === "/api/contacts" && req.method === "POST") {
           const body = await parseBody(req);
-          return json(createContact(body as any));
+          return json(await getStore().createContact(body as any));
         }
         if (path === "/api/contacts/search") {
           const q = url.searchParams.get("q") || "";
-          return json(searchContacts(q));
+          return json(await getStore().searchContacts(q));
         }
-        if (path === "/api/schedules" && req.method === "GET") return json(listSchedules());
+        if (path === "/api/schedules" && req.method === "GET") return json(await getStore().listSchedules());
         if (path === "/api/schedules" && req.method === "POST") {
           const body = await parseBody(req);
-          return json(createSchedule(body as any));
+          return json(await getStore().createSchedule(body as any));
         }
         if (path === "/api/schedules/ai" && req.method === "POST") {
           const body = await parseBody(req);
           return json(await generateSchedule(body.description as string));
         }
-        if (path === "/api/webhooks" && req.method === "GET") return json(listWebhooks());
+        if (path === "/api/webhooks" && req.method === "GET") return json(await getStore().listWebhooks());
         if (path === "/api/webhooks" && req.method === "POST") {
           const body = await parseBody(req);
-          return json(createWebhook(body as any));
+          return json(await getStore().createWebhook(body as any));
         }
         if (path === "/api/tts" && req.method === "POST") {
           const body = await parseBody(req);

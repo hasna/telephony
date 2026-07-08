@@ -2,7 +2,7 @@ import { handleInboundSms } from "../lib/sms.js";
 import { handleInboundWhatsApp } from "../lib/whatsapp.js";
 import { handleInboundCall } from "../lib/voice.js";
 import { handleVoicemailRecording } from "../lib/voicemail.js";
-import { dispatchWebhook } from "../db/webhooks.js";
+import { dispatchWebhook } from "../lib/webhooks.js";
 
 export function parseFormBody(body: string): Record<string, string> {
   const params: Record<string, string> = {};
