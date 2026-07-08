@@ -2,7 +2,7 @@
 // DO NOT EDIT. Regenerate: bun scripts/generate-sdk.mjs
 
 // @generated from OpenAPI by @hasna/contracts SDK generator — DO NOT EDIT.
-// Source: Telephony 0.2.4
+// Source: Telephony 0.2.5
 
 export interface Contact { "id": string; "name": string; "phone": string; "email"?: string | null; "agent_id"?: string | null; "project_id"?: string | null; "notes"?: string | null; "tags": Array<string>; "metadata": Record<string, unknown>; "created_at": string; "updated_at": string }
 
@@ -206,6 +206,24 @@ export class TelephonyApiClient {
       });
     }
 
+    /** Search available phone numbers to buy (server-side Twilio proxy) */
+    async searchAvailableNumbers(query?: { "country"?: string; "area_code"?: string; "contains"?: string; "sms_enabled"?: boolean; "voice_enabled"?: boolean; "limit"?: number }, init?: RequestInit): Promise<{ "items"?: Array<{ "phoneNumber"?: string; "friendlyName"?: string; "locality"?: string; "region"?: string; "capabilities"?: { "voice"?: boolean; "sms"?: boolean; "mms"?: boolean } }>; "total"?: number }> {
+      return this.request("GET", `/v1/numbers/available`, {
+        body: undefined,
+        query,
+        init,
+      });
+    }
+
+    /** List numbers owned in the Twilio account (server-side Twilio proxy) */
+    async listTwilioNumbers(init?: RequestInit): Promise<{ "items"?: Array<{ "sid"?: string; "phoneNumber"?: string; "friendlyName"?: string }>; "total"?: number }> {
+      return this.request("GET", `/v1/numbers/twilio`, {
+        body: undefined,
+        query: undefined,
+        init,
+      });
+    }
+
     /** List projects */
     async listProjects(init?: RequestInit): Promise<ProjectList> {
       return this.request("GET", `/v1/projects`, {
@@ -265,6 +283,15 @@ export class TelephonyApiClient {
       return this.request("GET", `/v1/voicemails`, {
         body: undefined,
         query,
+        init,
+      });
+    }
+
+    /** List available TTS voices (server-side ElevenLabs proxy) */
+    async listVoices(init?: RequestInit): Promise<{ "items"?: Array<{ "voice_id"?: string; "name"?: string; "category"?: string; "description"?: string }>; "total"?: number }> {
+      return this.request("GET", `/v1/voices`, {
+        body: undefined,
+        query: undefined,
         init,
       });
     }

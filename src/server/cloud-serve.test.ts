@@ -122,6 +122,36 @@ describe("telephony cloud serve", () => {
     expect(res.status).toBe(401);
   });
 
+  it("exposes the Twilio-proxy read routes (not captured as numbers/:id)", async () => {
+    // Ensure the server has no Twilio credential in this test process so the
+    // proxy resolves deterministically to 501 (route EXISTS) rather than a live
+    // call. This proves the diagnosis fix: GET /v1/numbers/available is no
+    // longer a 404, and is matched BEFORE the /v1/numbers/:id single-GET.
+    const twilioEnv = [
+      "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
+      "HASNAXYZ_TWILIO_LIVE_ACCOUNT_SID", "HASNAXYZ_TWILIO_LIVE_AUTH_TOKEN", "HASNAXYZ_TWILIO_LIVE_PHONE_NUMBER",
+    ];
+    const saved = twilioEnv.map((k) => [k, process.env[k]] as const);
+    for (const k of twilioEnv) delete process.env[k];
+    try {
+      const handler = createServeHandler(deps());
+      const key = mintApiKey({ app: "telephony", scopes: ["telephony:*"], signingSecret: SIGNING }).token;
+      const auth = { "x-api-key": key };
+
+      // Unauthenticated → 401 (auth enforced before Twilio).
+      expect((await handler(new Request("http://x/v1/numbers/available"))).status).toBe(401);
+
+      for (const path of ["/v1/numbers/available?country=US&area_code=415", "/v1/numbers/twilio"]) {
+        const res = await handler(new Request(`http://x${path}`, { headers: auth }));
+        expect(res.status).toBe(501);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).toBe("twilio_not_configured");
+      }
+    } finally {
+      for (const [k, v] of saved) if (v !== undefined) process.env[k] = v;
+    }
+  });
+
   it("does a full authenticated contacts CRUD roundtrip", async () => {
     const handler = createServeHandler(deps());
     const key = mintApiKey({ app: "telephony", scopes: ["telephony:*"], signingSecret: SIGNING }).token;

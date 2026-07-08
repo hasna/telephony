@@ -17,6 +17,8 @@
  *   /v1/projects          list/create/get/delete
  *   /v1/agents            list/register/get
  *   /v1/numbers           list/get
+ *   /v1/numbers/available Twilio proxy: search available numbers (server creds)
+ *   /v1/numbers/twilio    Twilio proxy: list account numbers (server creds)
  *   /v1/messages          list/get
  *   /v1/calls             list/get
  *   /v1/voicemails        list/get
@@ -32,6 +34,8 @@ import {
 } from "@hasna/contracts/auth";
 import { createTelephonyCloudClient } from "../db/remote-storage.js";
 import type { PoolQueryClient, TypedQueryClient } from "../generated/storage-kit/index.js";
+import { getTwilioClient, hasTwilioConfig } from "../lib/twilio.js";
+import { fetchVoicesFromProvider, hasElevenLabsConfig } from "../lib/tts.js";
 
 export const TELEPHONY_SERVE_APP = "telephony";
 
@@ -691,6 +695,74 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
         );
         return json({ items: rows.map(spec.map), total: rows.length });
       }
+      // ---- Twilio provider passthrough (server-side proxy) ----
+      // Live reads against the Twilio API using the server's Twilio credential
+      // (from Secrets Manager / env — NEVER distributed to clients). ApiStore
+      // routes CLI/MCP/SDK `searchAvailableNumbers` / `listTwilioNumbers` here so
+      // the client never holds real Twilio creds. Read-only, additive, reversible.
+      // Placed BEFORE the `/v1/numbers/:id` single-GET matcher so the literal
+      // sub-paths aren't captured as an id lookup.
+      if (path === "/v1/numbers/available" && method === "GET") {
+        await authOrThrow(req, ["telephony:read"]);
+        if (!hasTwilioConfig()) {
+          return json({ error: "twilio_not_configured", message: "Server has no Twilio credential configured." }, 501);
+        }
+        const country = url.searchParams.get("country") || "US";
+        const limit = clampLimit(url.searchParams.get("limit"), 10, 50);
+        const params: Record<string, unknown> = { limit };
+        const areaCode = url.searchParams.get("area_code");
+        const contains = url.searchParams.get("contains");
+        const smsEnabled = url.searchParams.get("sms_enabled");
+        const voiceEnabled = url.searchParams.get("voice_enabled");
+        if (areaCode) params.areaCode = parseInt(areaCode, 10);
+        if (contains) params.contains = contains;
+        if (smsEnabled != null) params.smsEnabled = smsEnabled === "true" || smsEnabled === "1";
+        if (voiceEnabled != null) params.voiceEnabled = voiceEnabled === "true" || voiceEnabled === "1";
+        try {
+          const numbers = await getTwilioClient().availablePhoneNumbers(country).local.list(params);
+          const items = numbers.map((n) => ({
+            phoneNumber: n.phoneNumber,
+            friendlyName: n.friendlyName,
+            locality: n.locality,
+            region: n.region,
+            capabilities: { voice: n.capabilities.voice, sms: n.capabilities.sms, mms: n.capabilities.mms },
+          }));
+          return json({ items, total: items.length });
+        } catch (err) {
+          return json({ error: "twilio_error", message: err instanceof Error ? err.message : "twilio request failed" }, 502);
+        }
+      }
+      if (path === "/v1/numbers/twilio" && method === "GET") {
+        await authOrThrow(req, ["telephony:read"]);
+        if (!hasTwilioConfig()) {
+          return json({ error: "twilio_not_configured", message: "Server has no Twilio credential configured." }, 501);
+        }
+        try {
+          const numbers = await getTwilioClient().incomingPhoneNumbers.list({ limit: 100 });
+          const items = numbers.map((n) => ({ sid: n.sid, phoneNumber: n.phoneNumber, friendlyName: n.friendlyName }));
+          return json({ items, total: items.length });
+        } catch (err) {
+          return json({ error: "twilio_error", message: err instanceof Error ? err.message : "twilio request failed" }, 502);
+        }
+      }
+      // ---- ElevenLabs provider passthrough (server-side proxy) ----
+      // Live read of TTS voices using the server's ElevenLabs credential (from
+      // Secrets Manager / env — NEVER distributed to clients). ApiStore routes
+      // CLI/MCP/SDK `listVoices` here so the client never holds a real
+      // ElevenLabs key. Read-only, additive, reversible.
+      if (path === "/v1/voices" && method === "GET") {
+        await authOrThrow(req, ["telephony:read"]);
+        if (!hasElevenLabsConfig()) {
+          return json({ error: "elevenlabs_not_configured", message: "Server has no ElevenLabs credential configured." }, 501);
+        }
+        try {
+          const items = await fetchVoicesFromProvider();
+          return json({ items, total: items.length });
+        } catch (err) {
+          return json({ error: "elevenlabs_error", message: err instanceof Error ? err.message : "elevenlabs request failed" }, 502);
+        }
+      }
+
       const singleGet: Record<string, { table: string; map: (r: Row) => unknown }> = {
         numbers: { table: "phone_numbers", map: mapNumber },
         messages: { table: "messages", map: mapMessage },
@@ -1413,6 +1485,119 @@ export function telephonyOpenApi(version: string): Record<string, unknown> {
           ],
           responses: {
             "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/PhoneNumberList" } } } },
+          },
+        },
+      },
+      "/v1/numbers/available": {
+        get: {
+          operationId: "searchAvailableNumbers",
+          summary: "Search available phone numbers to buy (server-side Twilio proxy)",
+          description:
+            "Live passthrough to Twilio using the server's credential. Returns 501 when the server has no Twilio credential configured, 502 on an upstream Twilio error.",
+          parameters: [
+            { name: "country", in: "query", schema: { type: "string" }, description: "ISO country code (default US)" },
+            { name: "area_code", in: "query", schema: { type: "string" } },
+            { name: "contains", in: "query", schema: { type: "string" } },
+            { name: "sms_enabled", in: "query", schema: { type: "boolean" } },
+            { name: "voice_enabled", in: "query", schema: { type: "boolean" } },
+            { name: "limit", in: "query", schema: { type: "integer" } },
+          ],
+          responses: {
+            "200": {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            phoneNumber: { type: "string" },
+                            friendlyName: { type: "string" },
+                            locality: { type: "string" },
+                            region: { type: "string" },
+                            capabilities: {
+                              type: "object",
+                              properties: { voice: { type: "boolean" }, sms: { type: "boolean" }, mms: { type: "boolean" } },
+                            },
+                          },
+                        },
+                      },
+                      total: { type: "integer" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/numbers/twilio": {
+        get: {
+          operationId: "listTwilioNumbers",
+          summary: "List numbers owned in the Twilio account (server-side Twilio proxy)",
+          description:
+            "Live passthrough to Twilio using the server's credential. Returns 501 when the server has no Twilio credential configured, 502 on an upstream Twilio error.",
+          responses: {
+            "200": {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            sid: { type: "string" },
+                            phoneNumber: { type: "string" },
+                            friendlyName: { type: "string" },
+                          },
+                        },
+                      },
+                      total: { type: "integer" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/voices": {
+        get: {
+          operationId: "listVoices",
+          summary: "List available TTS voices (server-side ElevenLabs proxy)",
+          description:
+            "Live passthrough to ElevenLabs using the server's credential. Returns 501 when the server has no ElevenLabs credential configured, 502 on an upstream ElevenLabs error.",
+          responses: {
+            "200": {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            voice_id: { type: "string" },
+                            name: { type: "string" },
+                            category: { type: "string" },
+                            description: { type: "string" },
+                          },
+                        },
+                      },
+                      total: { type: "integer" },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },

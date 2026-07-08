@@ -1,0 +1,19 @@
+# Deps are installed inside the image (bun install); never copy host node_modules
+# (workspace symlinks collide with the image's real packages).
+node_modules
+**/node_modules
+
+# VCS / local-only
+.git
+.gitignore
+
+# Build output (regenerated in-image via `bun run build`)
+dist
+
+# Local env / secrets / logs / caches
+.env
+.env.*
+*.log
+.DS_Store
+coverage
+.turbo

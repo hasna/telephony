@@ -122,6 +122,64 @@ describe("ApiStore cloud filters (parity with LocalStore)", () => {
   });
 });
 
+describe("ApiStore Twilio passthrough routes through the server /v1 proxy", () => {
+  // Capture transport.get() calls — the escape hatch ApiStore uses for the
+  // non-CRUD Twilio-proxy routes. The client must NEVER call Twilio directly.
+  function captureTransport(items: unknown[]) {
+    const calls: { path: string; query?: Record<string, unknown> }[] = [];
+    const client = {
+      name: "telephony",
+      baseUrl: "https://telephony.hasna.xyz/v1",
+      transport: {
+        baseUrl: "https://telephony.hasna.xyz/v1",
+        async get(path: string, opts?: { query?: Record<string, unknown> }) {
+          calls.push({ path, query: opts?.query });
+          return { items, total: items.length };
+        },
+        async request() { return {} as never; },
+        async post() { return {} as never; },
+        async put() { return {} as never; },
+        async patch() { return {} as never; },
+        async del() { return {} as never; },
+      },
+      async list() { return { items: [], total: 0, cursor: null, raw: {} }; },
+      async get() { return null; },
+      async create() { return {} as never; },
+      async update() { return {} as never; },
+      async delete() {},
+    };
+    return { client, calls };
+  }
+
+  it("searchAvailableNumbers → GET /numbers/available with mapped query", async () => {
+    const sample = [{ phoneNumber: "+15005550006", friendlyName: "(500) 555-0006", locality: "X", region: "CA", capabilities: { voice: true, sms: true, mms: false } }];
+    const { client, calls } = captureTransport(sample);
+    const store = new ApiStore(client as never);
+    const res = await store.searchAvailableNumbers({ country: "US", area_code: "415", limit: 5, sms_enabled: true });
+    expect(calls[0]!.path).toBe("/numbers/available");
+    expect(calls[0]!.query).toEqual({ country: "US", area_code: "415", sms_enabled: "true", limit: 5 });
+    expect(res).toEqual(sample);
+  });
+
+  it("listTwilioNumbers → GET /numbers/twilio", async () => {
+    const sample = [{ sid: "PNxxx", phoneNumber: "+15005550006", friendlyName: "main" }];
+    const { client, calls } = captureTransport(sample);
+    const store = new ApiStore(client as never);
+    const res = await store.listTwilioNumbers();
+    expect(calls[0]!.path).toBe("/numbers/twilio");
+    expect(res).toEqual(sample);
+  });
+
+  it("listVoices → GET /voices (client never calls ElevenLabs directly / needs no local key)", async () => {
+    const sample = [{ voice_id: "v1", name: "Rachel", category: "premade", description: "" }];
+    const { client, calls } = captureTransport(sample);
+    const store = new ApiStore(client as never);
+    const res = await store.listVoices();
+    expect(calls[0]!.path).toBe("/voices");
+    expect(res).toEqual(sample);
+  });
+});
+
 describe("ApiStore.registerAgent (parity with LocalStore conflict semantics)", () => {
   const existing: Agent = {
     id: "ag-1",

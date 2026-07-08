@@ -1,42 +1,15 @@
 import { getTwilioClient } from "./twilio.js";
 import { getStore } from "./store/index.js";
+import type { AvailableNumber, SearchAvailableOptions, TwilioNumberRef } from "./store/index.js";
 import type { PhoneNumber, PhoneNumberCapability } from "../types/index.js";
 
-export interface AvailableNumber {
-  phoneNumber: string;
-  friendlyName: string;
-  locality: string;
-  region: string;
-  capabilities: { voice: boolean; sms: boolean; mms: boolean };
-}
+export type { AvailableNumber, TwilioNumberRef } from "./store/index.js";
 
-export async function searchAvailableNumbers(options: {
-  country?: string;
-  area_code?: string;
-  contains?: string;
-  sms_enabled?: boolean;
-  voice_enabled?: boolean;
-  limit?: number;
-}): Promise<AvailableNumber[]> {
-  const client = getTwilioClient();
-  const country = options.country || "US";
-  const limit = options.limit || 10;
-
-  const params: Record<string, unknown> = { limit };
-  if (options.area_code) params.areaCode = parseInt(options.area_code, 10);
-  if (options.contains) params.contains = options.contains;
-  if (options.sms_enabled !== undefined) params.smsEnabled = options.sms_enabled;
-  if (options.voice_enabled !== undefined) params.voiceEnabled = options.voice_enabled;
-
-  const numbers = await client.availablePhoneNumbers(country).local.list(params);
-
-  return numbers.map(n => ({
-    phoneNumber: n.phoneNumber,
-    friendlyName: n.friendlyName,
-    locality: n.locality,
-    region: n.region,
-    capabilities: { voice: n.capabilities.voice, sms: n.capabilities.sms, mms: n.capabilities.mms },
-  }));
+// Twilio provider passthrough is routed through the Store so it obeys the
+// 3-mode standard: cloud/self_hosted mode goes through the server-side `/v1`
+// proxy (credential stays on the server), local mode calls Twilio directly.
+export async function searchAvailableNumbers(options: SearchAvailableOptions): Promise<AvailableNumber[]> {
+  return getStore().searchAvailableNumbers(options);
 }
 
 export async function provisionNumber(options: {
@@ -108,8 +81,6 @@ export async function configureNumber(sid: string, options: {
   await client.incomingPhoneNumbers(sid).update(params);
 }
 
-export async function listTwilioNumbers(): Promise<Array<{ sid: string; phoneNumber: string; friendlyName: string }>> {
-  const client = getTwilioClient();
-  const numbers = await client.incomingPhoneNumbers.list({ limit: 100 });
-  return numbers.map(n => ({ sid: n.sid, phoneNumber: n.phoneNumber, friendlyName: n.friendlyName }));
+export async function listTwilioNumbers(): Promise<TwilioNumberRef[]> {
+  return getStore().listTwilioNumbers();
 }

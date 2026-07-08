@@ -39,6 +39,8 @@ import * as dbContacts from "../../db/contacts.js";
 import * as dbSchedules from "../../db/schedules.js";
 import * as dbWebhooks from "../../db/webhooks.js";
 import { getDatabase } from "../../db/database.js";
+import { getTwilioClient } from "../twilio.js";
+import { fetchVoicesFromProvider, type Voice } from "../tts.js";
 
 import type {
   Agent,
@@ -117,6 +119,39 @@ export interface FeedbackInput {
   version: string;
 }
 
+// ── Twilio provider passthrough shapes ───────────────────────────────────────
+//
+// `searchAvailableNumbers` and `listTwilioNumbers` are NOT stored data — they
+// are live passthroughs to the Twilio API, which requires real Twilio
+// credentials. Per the self-host architecture the client NEVER holds real
+// provider credentials or calls third-party APIs directly in cloud mode, so
+// ApiStore routes these through the server-side `/v1/numbers/{available,twilio}`
+// proxy (the server holds the Twilio secret). LocalStore — which IS its own
+// server on-box — calls Twilio directly with the machine's local credentials.
+
+export interface AvailableNumber {
+  phoneNumber: string;
+  friendlyName: string;
+  locality: string;
+  region: string;
+  capabilities: { voice: boolean; sms: boolean; mms: boolean };
+}
+
+export interface TwilioNumberRef {
+  sid: string;
+  phoneNumber: string;
+  friendlyName: string;
+}
+
+export interface SearchAvailableOptions {
+  country?: string;
+  area_code?: string;
+  contains?: string;
+  sms_enabled?: boolean;
+  voice_enabled?: boolean;
+  limit?: number;
+}
+
 export interface MessageFilters {
   agent_id?: string;
   project_id?: string;
@@ -169,6 +204,15 @@ export interface TelephonyStore {
   createPhoneNumber(input: CreatePhoneNumberInput): Promise<PhoneNumber>;
   assignPhoneNumber(id: string, agentId?: string, projectId?: string): Promise<PhoneNumber | null>;
   releasePhoneNumber(id: string): Promise<boolean>;
+
+  // Twilio provider passthrough (live Twilio API — server-side proxy in cloud)
+  searchAvailableNumbers(options: SearchAvailableOptions): Promise<AvailableNumber[]>;
+  listTwilioNumbers(): Promise<TwilioNumberRef[]>;
+  // ElevenLabs provider passthrough (non-stored data) — same 3-mode contract as
+  // the Twilio passthrough above: LocalStore calls ElevenLabs directly, ApiStore
+  // routes through the server-side `/v1/voices` proxy so the credential stays
+  // on the server.
+  listVoices(): Promise<Voice[]>;
 
   // Messages
   createMessage(input: CreateMessageInput): Promise<Message>;
@@ -277,6 +321,36 @@ export class LocalStore implements TelephonyStore {
   }
   async releasePhoneNumber(id: string) {
     return dbNumbers.releasePhoneNumberDb(id);
+  }
+
+  // Twilio provider passthrough — local machine calls Twilio directly with its
+  // own configured credentials (local IS the server in this mode).
+  async searchAvailableNumbers(options: SearchAvailableOptions) {
+    const client = getTwilioClient();
+    const country = options.country || "US";
+    const limit = options.limit || 10;
+    const params: Record<string, unknown> = { limit };
+    if (options.area_code) params.areaCode = parseInt(options.area_code, 10);
+    if (options.contains) params.contains = options.contains;
+    if (options.sms_enabled !== undefined) params.smsEnabled = options.sms_enabled;
+    if (options.voice_enabled !== undefined) params.voiceEnabled = options.voice_enabled;
+    const numbers = await client.availablePhoneNumbers(country).local.list(params);
+    return numbers.map((n) => ({
+      phoneNumber: n.phoneNumber,
+      friendlyName: n.friendlyName,
+      locality: n.locality,
+      region: n.region,
+      capabilities: { voice: n.capabilities.voice, sms: n.capabilities.sms, mms: n.capabilities.mms },
+    }));
+  }
+  async listTwilioNumbers() {
+    const client = getTwilioClient();
+    const numbers = await client.incomingPhoneNumbers.list({ limit: 100 });
+    return numbers.map((n) => ({ sid: n.sid, phoneNumber: n.phoneNumber, friendlyName: n.friendlyName }));
+  }
+  async listVoices() {
+    // Local machine calls ElevenLabs directly with its own credential.
+    return fetchVoicesFromProvider();
   }
 
   // Messages
@@ -483,6 +557,32 @@ export class ApiStore implements TelephonyStore {
   async releasePhoneNumber(id: string) {
     await this.cloud.update<PhoneNumber>("numbers", id, { status: "released" });
     return true;
+  }
+
+  // Twilio provider passthrough — routed through the server-side `/v1` proxy so
+  // the real Twilio credential never leaves the server (Secrets Manager). These
+  // are non-CRUD routes, so they use the transport escape hatch rather than a
+  // resource-shaped list/get.
+  async searchAvailableNumbers(options: SearchAvailableOptions) {
+    const query: Record<string, string | number> = {};
+    if (options.country) query.country = options.country;
+    if (options.area_code) query.area_code = options.area_code;
+    if (options.contains) query.contains = options.contains;
+    if (options.sms_enabled !== undefined) query.sms_enabled = String(options.sms_enabled);
+    if (options.voice_enabled !== undefined) query.voice_enabled = String(options.voice_enabled);
+    if (options.limit !== undefined) query.limit = options.limit;
+    const res = await this.cloud.transport.get<{ items?: AvailableNumber[] }>("/numbers/available", { query });
+    return res.items ?? [];
+  }
+  async listTwilioNumbers() {
+    const res = await this.cloud.transport.get<{ items?: TwilioNumberRef[] }>("/numbers/twilio");
+    return res.items ?? [];
+  }
+  async listVoices() {
+    // Routed through the server-side `/v1/voices` proxy so the real ElevenLabs
+    // credential never leaves the server. Non-CRUD route → transport escape hatch.
+    const res = await this.cloud.transport.get<{ items?: Voice[] }>("/voices");
+    return res.items ?? [];
   }
 
   // Messages
