@@ -31,7 +31,7 @@ export type {
 } from "./lib/store/index.js";
 
 // Server bootstrap + cloud storage (self_hosted service side, PURE REMOTE)
-export { createTelephonyCloudClient, PgAdapterAsync, TELEPHONY_APP_NAME } from "./db/remote-storage.js";
+export { createTelephonyCloudClient, TELEPHONY_APP_NAME } from "./db/remote-storage.js";
 export { telephonyOpenApi, startTelephonyServe, createServeHandler, TELEPHONY_SERVE_APP } from "./server/cloud-serve.js";
 
 // Lib: Twilio

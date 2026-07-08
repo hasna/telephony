@@ -59,3 +59,55 @@ describe("telephony Store resolver", () => {
     expect(getStore(env).transport).toBe("cloud-http");
   });
 });
+
+describe("ApiStore cloud filters (parity with LocalStore)", () => {
+  // A capturing HasnaStorageClient stub that records the query passed to list().
+  function captureClient() {
+    const calls: { resource: string; query?: Record<string, unknown> }[] = [];
+    const client = {
+      name: "telephony",
+      baseUrl: "https://telephony.hasna.xyz/v1",
+      transport: {} as never,
+      async list(resource: string, options?: { query?: Record<string, unknown> }) {
+        calls.push({ resource, query: options?.query });
+        return { items: [], total: 0, cursor: null, raw: {} };
+      },
+      async get() {
+        return null;
+      },
+      async create() {
+        return {} as never;
+      },
+      async update() {
+        return {} as never;
+      },
+      async delete() {},
+    };
+    return { client, calls };
+  }
+
+  it("sends the listened filter to /v1/voicemails (--unheard not dropped)", async () => {
+    const { client, calls } = captureClient();
+    const store = new ApiStore(client as never);
+    await store.listVoicemails({ listened: false });
+    const call = calls.find((c) => c.resource === "voicemails")!;
+    expect(call.query).toEqual({ listened: "false" });
+  });
+
+  it("omits listened when the filter is undefined (tri-state)", async () => {
+    const { client, calls } = captureClient();
+    const store = new ApiStore(client as never);
+    await store.listVoicemails({ agent_id: "a1" });
+    const call = calls.find((c) => c.resource === "voicemails")!;
+    expect(call.query).toEqual({ agent_id: "a1" });
+  });
+
+  it("sends agent_id/project_id/enabled to /v1/schedules (filters not dropped)", async () => {
+    const { client, calls } = captureClient();
+    const store = new ApiStore(client as never);
+    await store.listSchedules({ agent_id: "a1", project_id: "p1", enabled: true });
+    const call = calls.find((c) => c.resource === "schedules")!;
+    // listAll drops undefined keys; enabled must be present as "true".
+    expect(call.query).toMatchObject({ agent_id: "a1", project_id: "p1", enabled: "true" });
+  });
+});

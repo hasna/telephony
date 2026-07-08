@@ -1,6 +1,6 @@
 {
   "name": "@hasna/telephony",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Telephony platform for AI agents — SMS, WhatsApp, voice calls, TTS/STT, real-time streaming",
   "type": "module",
   "main": "dist/index.js",
@@ -27,7 +27,7 @@
   ],
   "scripts": {
     "generate:sdk": "bun scripts/generate-sdk.mjs",
-    "build": "bun run generate:sdk && rm -rf dist && bun build src/cli/index.ts --outdir dist/cli --target bun --external @modelcontextprotocol/sdk --external twilio --external pg --external @hasna/contracts && bun build src/mcp/index.ts --outdir dist/mcp --target bun --external @modelcontextprotocol/sdk --external twilio --external pg --external @hasna/contracts --external @hasna/mcp-harness && bun build src/server/cloud-entry.ts --outdir dist/server --target bun --external twilio --external pg --external @hasna/contracts && bun build src/server/index.ts --outdir dist/server --target bun --external twilio --external pg --external @hasna/contracts && bun build src/index.ts --outdir dist --target bun --external twilio --external pg --external @hasna/contracts && tsc --emitDeclarationOnly --outDir dist",
+    "build": "bun run generate:sdk && rm -rf dist && bun build src/cli/index.ts --outdir dist/cli --target bun --external @modelcontextprotocol/sdk --external twilio --external pg --external @hasna/contracts && bun build src/mcp/index.ts --outdir dist/mcp --target bun --external @modelcontextprotocol/sdk --external twilio --external pg --external @hasna/contracts && bun build src/server/cloud-entry.ts --outdir dist/server --target bun --external twilio --external pg --external @hasna/contracts && bun build src/server/index.ts --outdir dist/server --target bun --external twilio --external pg --external @hasna/contracts && bun build src/index.ts --outdir dist --target bun --external twilio --external pg --external @hasna/contracts && tsc --emitDeclarationOnly --outDir dist",
     "build:dashboard": "cd dashboard && bun run build",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
@@ -76,7 +76,6 @@
   "dependencies": {
     "@hasna/contracts": "^0.4.2",
     "@hasna/events": "^0.1.6",
-    "@hasna/mcp-harness": "file:../open-mcp",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "commander": "^13.1.0",
     "pg": "^8.13.1",

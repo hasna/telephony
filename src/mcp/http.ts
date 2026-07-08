@@ -1,14 +1,16 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { resolveMcpHttpPort as harnessResolveMcpHttpPort } from "@hasna/mcp-harness";
-import { handleStatelessMcpNode } from "@hasna/mcp-harness/node";
+import {
+  resolveMcpHttpPort as harnessResolveMcpHttpPort,
+  handleStatelessMcpNode,
+} from "../generated/mcp-harness.js";
 import { buildServer } from "./server.js";
 
 /**
- * open-telephony MCP transport/port boilerplate — now a thin shim over
- * `@hasna/mcp-harness`. The public API (names, signatures, health shape) is
- * preserved so `mcp/index.ts` and the tests are unchanged; the `POST /mcp`
- * request handling and env/default port resolution now delegate to the
- * shared harness.
+ * open-telephony MCP transport/port boilerplate — a thin shim over the
+ * vendored mcp-harness helpers (`src/generated/mcp-harness.ts`). The public API
+ * (names, signatures, health shape) is preserved so `mcp/index.ts` and the
+ * tests are unchanged; the `POST /mcp` request handling and env/default port
+ * resolution delegate to the vendored helpers.
  *
  * Two bits stay hand-wired because telephony's dialect diverges from the
  * harness's own semantics:

@@ -453,7 +453,9 @@ export class ApiStore implements TelephonyStore {
     return this.listAll<PhoneNumber>("numbers", filters);
   }
   async getPhoneNumberByNumber(number: string) {
-    const items = await this.listAll<PhoneNumber>("numbers");
+    // Exact `number` filter served DB-side — never a client-side scan of a
+    // capped page (that missed numbers beyond the first page at scale).
+    const items = await this.listAll<PhoneNumber>("numbers", { number });
     return items.find((n) => n.number === number) ?? null;
   }
   async createPhoneNumber(input: CreatePhoneNumberInput) {
@@ -481,13 +483,18 @@ export class ApiStore implements TelephonyStore {
     return this.listAll<Message>("messages", { ...filters });
   }
   async searchMessages(query: string, limit?: number) {
-    const items = await this.listAll<Message>("messages", { limit: limit ?? 200 });
-    const needle = query.toLowerCase();
-    return items.filter((m) => (m.body ?? "").toLowerCase().includes(needle));
+    // Full-table body search served DB-side (`search` param): case-insensitive
+    // substring match on `body`, ordered newest-first. NOTE: LocalStore uses
+    // SQLite FTS5 (tokenized MATCH, relevance-ranked), so cloud results are a
+    // superset ordered by recency rather than relevance — same rows for
+    // whole-token queries, but substring matches (partial tokens) also hit
+    // here. Default limit mirrors local (50).
+    return this.listAll<Message>("messages", { search: query, limit: limit ?? 50 });
   }
   async getConversation(phoneNumber: string, limit?: number) {
-    const items = await this.listAll<Message>("messages", { limit: limit ?? 200 });
-    return items.filter((m) => m.from_number === phoneNumber || m.to_number === phoneNumber);
+    // Conversation filter served DB-side (`number` param → from_number OR
+    // to_number) — parity with LocalStore.getConversation. Default limit 50.
+    return this.listAll<Message>("messages", { number: phoneNumber, limit: limit ?? 50 });
   }
 
   // Calls
@@ -513,6 +520,9 @@ export class ApiStore implements TelephonyStore {
     const q: Record<string, string | number> = {};
     if (filters?.agent_id) q.agent_id = filters.agent_id;
     if (filters?.project_id) q.project_id = filters.project_id;
+    // listened is a tri-state (undefined = no filter); send it DB-side so the
+    // --unheard filter isn't silently dropped in cloud mode.
+    if (filters?.listened !== undefined) q.listened = String(filters.listened);
     return (await this.cloud.list<Voicemail>("voicemails", { query: q })).items;
   }
   async markVoicemailListened(id: string) {
@@ -540,7 +550,13 @@ export class ApiStore implements TelephonyStore {
     return this.cloud.create<Schedule>("schedules", input);
   }
   async listSchedules(filters?: ScheduleFilters) {
-    return this.listAll<Schedule>("schedules", { agent_id: filters?.agent_id, project_id: filters?.project_id });
+    // enabled is a tri-state (undefined = no filter); send all three DB-side so
+    // the CLI/MCP schedule-list filters aren't silently dropped in cloud mode.
+    return this.listAll<Schedule>("schedules", {
+      agent_id: filters?.agent_id,
+      project_id: filters?.project_id,
+      enabled: filters?.enabled === undefined ? undefined : String(filters.enabled),
+    });
   }
   async enableSchedule(id: string) {
     await this.cloud.update<Schedule>("schedules", id, { enabled: true });

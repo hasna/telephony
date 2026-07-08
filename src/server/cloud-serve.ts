@@ -15,7 +15,7 @@
  * Versioned API (all require an API key; scopes telephony:read / telephony:write):
  *   /v1/contacts          CRUD (list/create/get/patch/delete)
  *   /v1/projects          list/create/get/delete
- *   /v1/agents            list/register
+ *   /v1/agents            list/register/get
  *   /v1/numbers           list/get
  *   /v1/messages          list/get
  *   /v1/calls             list/get
@@ -536,11 +536,23 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
       }
 
       // ---- read-only collections ----
-      const listOnly: Record<string, { table: string; order: string; map: (r: Row) => unknown; filters: string[] }> = {
-        "/v1/numbers": { table: "phone_numbers", order: "created_at DESC", map: mapNumber, filters: ["agent_id", "project_id", "status"] },
-        "/v1/messages": { table: "messages", order: "created_at DESC", map: mapMessage, filters: ["agent_id", "project_id", "type"] },
+      // `filters` are exact-match columns (col = $n). `search` (when present)
+      // maps the `search` query param to a case-insensitive substring (ILIKE)
+      // match over the listed columns, ordered newest-first. NOTE: this differs
+      // from LocalStore.searchMessages, which uses SQLite FTS5 (tokenized MATCH,
+      // relevance-ranked); the ILIKE path is a recency-ordered substring match,
+      // not a token-relevance search. `phone` maps the `number` query param to
+      // (from_number = $n OR to_number = $n) — parity with
+      // LocalStore.getConversation. Both must be served DB-side so cloud never
+      // silently searches only the most-recent page at fleet scale.
+      const listOnly: Record<
+        string,
+        { table: string; order: string; map: (r: Row) => unknown; filters: string[]; bools?: string[]; search?: string[]; phone?: boolean }
+      > = {
+        "/v1/numbers": { table: "phone_numbers", order: "created_at DESC", map: mapNumber, filters: ["agent_id", "project_id", "status", "number"] },
+        "/v1/messages": { table: "messages", order: "created_at DESC", map: mapMessage, filters: ["agent_id", "project_id", "type"], search: ["body"], phone: true },
         "/v1/calls": { table: "calls", order: "started_at DESC", map: mapCall, filters: ["agent_id", "project_id"] },
-        "/v1/voicemails": { table: "voicemails", order: "created_at DESC", map: mapVoicemail, filters: ["agent_id", "project_id"] },
+        "/v1/voicemails": { table: "voicemails", order: "created_at DESC", map: mapVoicemail, filters: ["agent_id", "project_id", "listened"], bools: ["listened"] },
       };
       if (listOnly[path] && method === "GET") {
         await authOrThrow(req, ["telephony:read"]);
@@ -551,8 +563,27 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
         for (const col of spec.filters) {
           const val = url.searchParams.get(col);
           if (val != null && val !== "") {
-            params.push(val);
+            // Boolean filter columns (e.g. voicemails.listened) arrive as the
+            // strings "true"/"false"; bind a real boolean so Postgres compares
+            // boolean = boolean rather than boolean = text.
+            params.push(spec.bools?.includes(col) ? val === "true" || val === "1" : val);
             where.push(`${col} = $${params.length}`);
+          }
+        }
+        if (spec.search) {
+          const term = url.searchParams.get("search");
+          if (term != null && term !== "") {
+            params.push(`%${term}%`);
+            const idx = params.length;
+            where.push(`(${spec.search.map((c) => `${c} ILIKE $${idx}`).join(" OR ")})`);
+          }
+        }
+        if (spec.phone) {
+          const num = url.searchParams.get("number");
+          if (num != null && num !== "") {
+            params.push(num);
+            const idx = params.length;
+            where.push(`(from_number = $${idx} OR to_number = $${idx})`);
           }
         }
         const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
@@ -567,8 +598,9 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
         messages: { table: "messages", map: mapMessage },
         calls: { table: "calls", map: mapCall },
         voicemails: { table: "voicemails", map: mapVoicemail },
+        agents: { table: "agents", map: mapAgent },
       };
-      const singleMatch = path.match(/^\/v1\/(numbers|messages|calls|voicemails)\/([^/]+)$/);
+      const singleMatch = path.match(/^\/v1\/(numbers|messages|calls|voicemails|agents)\/([^/]+)$/);
       if (singleMatch && method === "GET") {
         await authOrThrow(req, ["telephony:read"]);
         const spec = singleGet[singleMatch[1]!]!;
@@ -747,7 +779,27 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
       if (path === "/v1/schedules") {
         if (method === "GET") {
           await authOrThrow(req, ["telephony:read"]);
-          const rows = await db.many<Row>(`SELECT * FROM schedules ORDER BY created_at DESC LIMIT 200`);
+          // Parity with LocalStore.listSchedules: agent_id/project_id (exact) and
+          // enabled (boolean) filters served DB-side, not silently dropped.
+          const where: string[] = [];
+          const params: unknown[] = [];
+          for (const col of ["agent_id", "project_id"]) {
+            const val = url.searchParams.get(col);
+            if (val != null && val !== "") {
+              params.push(val);
+              where.push(`${col} = $${params.length}`);
+            }
+          }
+          const enabledRaw = url.searchParams.get("enabled");
+          if (enabledRaw != null && enabledRaw !== "") {
+            params.push(enabledRaw === "true" || enabledRaw === "1");
+            where.push(`enabled = $${params.length}`);
+          }
+          const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+          const rows = await db.many<Row>(
+            `SELECT * FROM schedules ${clause} ORDER BY created_at DESC LIMIT 200`,
+            params,
+          );
           return json({ items: rows.map(mapSchedule), total: rows.length });
         }
         if (method === "POST") {
@@ -1240,7 +1292,13 @@ export function telephonyOpenApi(version: string): Record<string, unknown> {
         get: {
           operationId: "listNumbers",
           summary: "List phone numbers",
-          parameters: [{ name: "limit", in: "query", schema: { type: "integer" } }],
+          parameters: [
+            { name: "limit", in: "query", schema: { type: "integer" } },
+            { name: "agent_id", in: "query", schema: { type: "string" } },
+            { name: "project_id", in: "query", schema: { type: "string" } },
+            { name: "status", in: "query", schema: { type: "string" } },
+            { name: "number", in: "query", schema: { type: "string" }, description: "Exact E.164 number lookup" },
+          ],
           responses: {
             "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/PhoneNumberList" } } } },
           },
@@ -1250,7 +1308,14 @@ export function telephonyOpenApi(version: string): Record<string, unknown> {
         get: {
           operationId: "listMessages",
           summary: "List messages",
-          parameters: [{ name: "limit", in: "query", schema: { type: "integer" } }],
+          parameters: [
+            { name: "limit", in: "query", schema: { type: "integer" } },
+            { name: "agent_id", in: "query", schema: { type: "string" } },
+            { name: "project_id", in: "query", schema: { type: "string" } },
+            { name: "type", in: "query", schema: { type: "string" } },
+            { name: "search", in: "query", schema: { type: "string" }, description: "Case-insensitive substring match over message body" },
+            { name: "number", in: "query", schema: { type: "string" }, description: "Conversation filter: messages to or from this number" },
+          ],
           responses: {
             "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/MessageList" } } } },
           },
@@ -1270,9 +1335,24 @@ export function telephonyOpenApi(version: string): Record<string, unknown> {
         get: {
           operationId: "listVoicemails",
           summary: "List voicemails",
-          parameters: [{ name: "limit", in: "query", schema: { type: "integer" } }],
+          parameters: [
+            { name: "limit", in: "query", schema: { type: "integer" } },
+            { name: "agent_id", in: "query", schema: { type: "string" } },
+            { name: "project_id", in: "query", schema: { type: "string" } },
+            { name: "listened", in: "query", schema: { type: "boolean" }, description: "Filter by listened state (false => unheard only)" },
+          ],
           responses: {
             "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/VoicemailList" } } } },
+          },
+        },
+      },
+      "/v1/agents/{id}": {
+        get: {
+          operationId: "getAgent",
+          summary: "Fetch an agent by id",
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/Agent" } } } },
           },
         },
       },
@@ -1280,6 +1360,11 @@ export function telephonyOpenApi(version: string): Record<string, unknown> {
         get: {
           operationId: "listSchedules",
           summary: "List schedules",
+          parameters: [
+            { name: "agent_id", in: "query", schema: { type: "string" } },
+            { name: "project_id", in: "query", schema: { type: "string" } },
+            { name: "enabled", in: "query", schema: { type: "boolean" } },
+          ],
           responses: {
             "200": { content: { "application/json": { schema: { $ref: "#/components/schemas/ScheduleList" } } } },
           },

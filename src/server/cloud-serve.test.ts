@@ -155,6 +155,99 @@ describe("telephony cloud serve", () => {
     expect(gone.status).toBe(404);
   });
 
+  // -----------------------------------------------------------------------
+  // Parity: cloud list filters must be served DB-side, not by scanning a
+  // capped page client-side (the split-brain bug at fleet scale).
+  // -----------------------------------------------------------------------
+  function capturingDeps(): { deps: ServeDeps; sql: { text: string; params: readonly unknown[] }[] } {
+    const sql: { text: string; params: readonly unknown[] }[] = [];
+    const run = (text: string, params: readonly unknown[] = []) => {
+      const s = text.replace(/\s+/g, " ").trim().toLowerCase();
+      if (s.startsWith("select 1")) return { rows: [{ "?column?": 1 }], rowCount: 1 };
+      if (s.includes("from api_keys")) return { rows: [], rowCount: 0 };
+      if (s.startsWith("select")) sql.push({ text: s, params });
+      return { rows: [], rowCount: 0 };
+    };
+    const client = {
+      async query(t: string, p?: readonly unknown[]) { return run(t, p); },
+      async many(t: string, p?: readonly unknown[]) { return run(t, p).rows; },
+      async get(t: string, p?: readonly unknown[]) { return run(t, p).rows[0] ?? null; },
+      async one(t: string, p?: readonly unknown[]) { return run(t, p).rows[0]; },
+      async execute(t: string, p?: readonly unknown[]) { run(t, p); },
+      pool: {} as never,
+      async transaction<T>(fn: (c: unknown) => Promise<T>) { return fn(client); },
+      async close() {},
+    } as unknown as PoolQueryClient;
+    const store = new ApiKeyStore(client);
+    const verifier = verifyApiKey({ app: "telephony", signingSecret: SIGNING, isRevoked: store.isRevoked });
+    return { deps: { client, verifier, store, version: "9.9.9" }, sql };
+  }
+
+  it("filters /v1/numbers by exact number DB-side (not a client scan)", async () => {
+    const { deps: d, sql } = capturingDeps();
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    await handler(new Request("http://x/v1/numbers?number=%2B15005550006", { headers: { "x-api-key": key } }));
+    const q = sql.find((r) => r.text.includes("from phone_numbers"))!;
+    expect(q.text).toContain("number = $1");
+    expect(q.params).toEqual(["+15005550006"]);
+  });
+
+  it("searches /v1/messages by body substring DB-side (full-table, not a page)", async () => {
+    const { deps: d, sql } = capturingDeps();
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    await handler(new Request("http://x/v1/messages?search=hello", { headers: { "x-api-key": key } }));
+    const q = sql.find((r) => r.text.includes("from messages"))!;
+    expect(q.text).toContain("body ilike $1");
+    expect(q.params).toEqual(["%hello%"]);
+  });
+
+  it("filters /v1/messages conversation by number DB-side (from OR to)", async () => {
+    const { deps: d, sql } = capturingDeps();
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    await handler(new Request("http://x/v1/messages?number=%2B15005550006", { headers: { "x-api-key": key } }));
+    const q = sql.find((r) => r.text.includes("from messages"))!;
+    expect(q.text).toContain("(from_number = $1 or to_number = $1)");
+    expect(q.params).toEqual(["+15005550006"]);
+  });
+
+  it("serves GET /v1/agents/:id DB-side (cloud getAgent by id must not 404 the route)", async () => {
+    const { deps: d, sql } = capturingDeps();
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    await handler(new Request("http://x/v1/agents/agent-123", { headers: { "x-api-key": key } }));
+    // Before the fix the route did not exist, so no SELECT against agents fired.
+    const q = sql.find((r) => r.text.includes("from agents where id"))!;
+    expect(q).toBeDefined();
+    expect(q.params).toEqual(["agent-123"]);
+  });
+
+  it("filters /v1/voicemails by listened DB-side (--unheard must not be dropped)", async () => {
+    const { deps: d, sql } = capturingDeps();
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    await handler(new Request("http://x/v1/voicemails?listened=false", { headers: { "x-api-key": key } }));
+    const q = sql.find((r) => r.text.includes("from voicemails"))!;
+    expect(q.text).toContain("listened = $1");
+    // Bound as a real boolean (not the string "false") so Postgres compares boolean = boolean.
+    expect(q.params).toEqual([false]);
+  });
+
+  it("filters /v1/schedules by agent_id/project_id/enabled DB-side (not silently dropped)", async () => {
+    const { deps: d, sql } = capturingDeps();
+    const handler = createServeHandler(d);
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    await handler(
+      new Request("http://x/v1/schedules?agent_id=ag1&enabled=true", { headers: { "x-api-key": key } }),
+    );
+    const q = sql.find((r) => r.text.includes("from schedules"))!;
+    expect(q.text).toContain("agent_id = $1");
+    expect(q.text).toContain("enabled = $2");
+    expect(q.params).toEqual(["ag1", true]);
+  });
+
   it("enforces scopes: a read-only key cannot write", async () => {
     const handler = createServeHandler(deps());
     const roKey = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;

@@ -125,6 +125,15 @@ export class TelephonyApiClient {
       });
     }
 
+    /** Fetch an agent by id */
+    async getAgent(id: string, init?: RequestInit): Promise<Agent> {
+      return this.request("GET", `/v1/agents/${encodeURIComponent(String(id))}`, {
+        body: undefined,
+        query: undefined,
+        init,
+      });
+    }
+
     /** List calls */
     async listCalls(query?: { "limit"?: number }, init?: RequestInit): Promise<CallList> {
       return this.request("GET", `/v1/calls`, {
@@ -180,7 +189,7 @@ export class TelephonyApiClient {
     }
 
     /** List messages */
-    async listMessages(query?: { "limit"?: number }, init?: RequestInit): Promise<MessageList> {
+    async listMessages(query?: { "limit"?: number; "agent_id"?: string; "project_id"?: string; "type"?: string; "search"?: string; "number"?: string }, init?: RequestInit): Promise<MessageList> {
       return this.request("GET", `/v1/messages`, {
         body: undefined,
         query,
@@ -189,7 +198,7 @@ export class TelephonyApiClient {
     }
 
     /** List phone numbers */
-    async listNumbers(query?: { "limit"?: number }, init?: RequestInit): Promise<PhoneNumberList> {
+    async listNumbers(query?: { "limit"?: number; "agent_id"?: string; "project_id"?: string; "status"?: string; "number"?: string }, init?: RequestInit): Promise<PhoneNumberList> {
       return this.request("GET", `/v1/numbers`, {
         body: undefined,
         query,
@@ -234,10 +243,10 @@ export class TelephonyApiClient {
     }
 
     /** List schedules */
-    async listSchedules(init?: RequestInit): Promise<ScheduleList> {
+    async listSchedules(query?: { "agent_id"?: string; "project_id"?: string; "enabled"?: boolean }, init?: RequestInit): Promise<ScheduleList> {
       return this.request("GET", `/v1/schedules`, {
         body: undefined,
-        query: undefined,
+        query,
         init,
       });
     }
@@ -252,7 +261,7 @@ export class TelephonyApiClient {
     }
 
     /** List voicemails */
-    async listVoicemails(query?: { "limit"?: number }, init?: RequestInit): Promise<VoicemailList> {
+    async listVoicemails(query?: { "limit"?: number; "agent_id"?: string; "project_id"?: string; "listened"?: boolean }, init?: RequestInit): Promise<VoicemailList> {
       return this.request("GET", `/v1/voicemails`, {
         body: undefined,
         query,
