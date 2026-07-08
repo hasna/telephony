@@ -78,13 +78,32 @@ export function listMessages(
 
 export function searchMessages(query: string, limit?: number, db?: Database): Message[] {
   const d = db || getDatabase();
+  const match = toFtsQuery(query);
+  // A query with no usable tokens (e.g. all punctuation) can't match anything;
+  // return empty rather than handing FTS5 an empty MATCH string (a syntax error).
+  if (!match) return [];
   const rows = d.prepare(
     `SELECT m.* FROM messages m
      JOIN messages_fts fts ON m.rowid = fts.rowid
      WHERE messages_fts MATCH ?
      ORDER BY rank LIMIT ?`,
-  ).all(query, limit || 50) as MessageRow[];
+  ).all(match, limit || 50) as MessageRow[];
   return rows.map(rowToMessage);
+}
+
+/**
+ * Turn arbitrary user input into a safe FTS5 MATCH string. Each whitespace-
+ * separated token is wrapped in double quotes (and any embedded quote doubled),
+ * so FTS5 operator characters (`-`, `*`, `:`, `(`, `"`, `NEAR`, etc.) are
+ * treated as literal text instead of throwing a SQLiteError on e.g. `a-b`.
+ */
+function toFtsQuery(query: string): string {
+  return query
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0)
+    .map((t) => `"${t.replace(/"/g, '""')}"`)
+    .join(" ");
 }
 
 export function getConversation(phoneNumber: string, limit?: number, db?: Database): Message[] {

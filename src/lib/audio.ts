@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, basename } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 
 const AUDIO_DIR = join(homedir(), ".hasna", "telephony", "audio");
@@ -10,8 +10,11 @@ export function getAudioDir(): string {
 }
 
 export function saveAudio(buffer: Buffer | Uint8Array, filename: string): string {
-  const dir = getAudioDir();
-  const path = join(dir, filename);
+  // An absolute --out path is honored as-is; a relative one (including one with
+  // nested segments like "clips/foo.mp3") is resolved under the audio dir.
+  const path = isAbsolute(filename) ? filename : join(getAudioDir(), filename);
+  // Create the target's parent directory so nested/out paths don't ENOENT.
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, buffer);
   return path;
 }
