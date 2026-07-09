@@ -248,6 +248,43 @@ describe("telephony cloud serve", () => {
     expect(listedBody.items[0]!.secret).toBeUndefined();
   });
 
+  it("keeps signing secrets behind the private dispatch-target scope", async () => {
+    const handler = createServeHandler(deps());
+    const writer = mintApiKey({ app: "telephony", scopes: ["telephony:write"], signingSecret: SIGNING }).token;
+    const reader = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    const dispatcher = mintApiKey({
+      app: "telephony",
+      scopes: ["telephony:dispatch"],
+      signingSecret: SIGNING,
+    }).token;
+
+    const created = await handler(
+      new Request("http://x/v1/webhooks", {
+        method: "POST",
+        headers: { "x-api-key": writer, "content-type": "application/json" },
+        body: JSON.stringify({
+          url: "https://example.com/hook",
+          events: ["sms.inbound"],
+          secret: "synthetic-signing-secret",
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+
+    const readOnly = await handler(
+      new Request("http://x/v1/internal/webhook-dispatch-targets", { headers: { "x-api-key": reader } }),
+    );
+    expect(readOnly.status).toBe(403);
+
+    const privateList = await handler(
+      new Request("http://x/v1/internal/webhook-dispatch-targets", { headers: { "x-api-key": dispatcher } }),
+    );
+    expect(privateList.status).toBe(200);
+    const privateBody = (await privateList.json()) as { items: Record<string, unknown>[] };
+    expect(privateBody.items[0]!.secret_configured).toBe(true);
+    expect(privateBody.items[0]!.secret).toBe("synthetic-signing-secret");
+  });
+
   // -----------------------------------------------------------------------
   // Parity: cloud list filters must be served DB-side, not by scanning a
   // capped page client-side (the split-brain bug at fleet scale).

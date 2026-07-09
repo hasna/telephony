@@ -12,7 +12,8 @@
  *   GET  /version         { status, version, mode }
  *   GET  /openapi.json    OpenAPI 3 document (source for the SDK)
  *
- * Versioned API (all require an API key; scopes telephony:read / telephony:write):
+ * Versioned API (all require an API key; scopes telephony:read / telephony:write,
+ * plus private internal scopes for server-to-server dispatch):
  *   /v1/contacts          CRUD (list/create/get/patch/delete)
  *   /v1/projects          list/create/get/delete
  *   /v1/agents            list/register/get
@@ -309,6 +310,13 @@ function mapWebhook(r: Row) {
     secret_configured: Boolean(r.secret),
     active: Boolean(r.active),
     created_at: iso(r.created_at),
+  };
+}
+
+function mapWebhookDispatchTarget(r: Row) {
+  return {
+    ...mapWebhook(r),
+    secret: (r.secret as string | null) ?? null,
   };
 }
 
@@ -1032,6 +1040,19 @@ export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<R
           await authOrThrow(req, ["telephony:write"]);
           const result = await db.query(`DELETE FROM schedules WHERE id = $1`, [id]);
           return result.rowCount > 0 ? new Response(null, { status: 204 }) : json({ error: "not_found" }, 404);
+        }
+        return json({ error: "method_not_allowed" }, 405);
+      }
+
+      // ---- private server-to-server dispatch targets ----
+      // This route intentionally is not part of the public OpenAPI document.
+      // It carries webhook signing material and must require a dedicated
+      // dispatch scope, while public /v1/webhooks returns only secret_configured.
+      if (path === "/v1/internal/webhook-dispatch-targets") {
+        if (method === "GET") {
+          await authOrThrow(req, ["telephony:dispatch"]);
+          const rows = await db.many<Row>(`SELECT * FROM webhooks ORDER BY created_at DESC LIMIT 200`);
+          return json({ items: rows.map(mapWebhookDispatchTarget), total: rows.length });
         }
         return json({ error: "method_not_allowed" }, 405);
       }

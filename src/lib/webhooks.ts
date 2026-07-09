@@ -1,10 +1,10 @@
-// Outbound webhook dispatch signs locally from the private DB row. The public
-// Store/API/CLI webhook DTO intentionally exposes only secret presence.
+// Outbound webhook dispatch goes through the Store so cloud/self_hosted webhook
+// receivers use cloud-registered targets, while public webhook DTOs stay redacted.
 
-import { listWebhookDispatchTargets } from "../db/webhooks.js";
+import { getStore } from "./store/index.js";
 
 export async function dispatchWebhook(event: string, payload: unknown): Promise<void> {
-  const all = listWebhookDispatchTargets();
+  const all = await getStore().listWebhookDispatchTargets();
   const targets = all.filter((w) => w.active && (w.events.length === 0 || w.events.includes(event)));
   for (const wh of targets) {
     try {
