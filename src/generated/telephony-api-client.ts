@@ -2,7 +2,7 @@
 // DO NOT EDIT. Regenerate: bun scripts/generate-sdk.mjs
 
 // @generated from OpenAPI by @hasna/contracts SDK generator — DO NOT EDIT.
-// Source: Telephony 0.2.7
+// Source: Telephony 0.2.8
 
 export interface Contact { "id": string; "name": string; "phone": string; "email"?: string | null; "agent_id"?: string | null; "project_id"?: string | null; "notes"?: string | null; "tags": Array<string>; "metadata": Record<string, unknown>; "created_at": string; "updated_at": string }
 
@@ -30,7 +30,7 @@ export interface ScheduleInput { "name": string; "cron_expression": string; "com
 
 export interface ScheduleList { "items": Array<Schedule>; "total": number }
 
-export interface Webhook { "id": string; "url": string; "events": Array<string>; "secret"?: string | null; "active": boolean; "created_at": string }
+export interface Webhook { "id": string; "url": string; "events": Array<string>; "secret_configured": boolean; "active": boolean; "created_at": string }
 
 export interface WebhookInput { "url": string; "events"?: Array<string>; "secret"?: string | null }
 

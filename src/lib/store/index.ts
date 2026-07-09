@@ -63,6 +63,7 @@ import type {
   Schedule,
   Voicemail,
   Webhook,
+  WebhookDispatchTarget,
 } from "../../types/index.js";
 
 export const TELEPHONY_APP = "telephony";
@@ -253,6 +254,7 @@ export interface TelephonyStore {
   // Webhooks
   createWebhook(input: CreateWebhookInput): Promise<Webhook>;
   listWebhooks(): Promise<Webhook[]>;
+  listWebhookDispatchTargets(): Promise<WebhookDispatchTarget[]>;
   deleteWebhook(id: string): Promise<boolean>;
 
   // Feedback
@@ -439,6 +441,9 @@ export class LocalStore implements TelephonyStore {
   }
   async listWebhooks() {
     return dbWebhooks.listWebhooks();
+  }
+  async listWebhookDispatchTargets() {
+    return dbWebhooks.listWebhookDispatchTargets();
   }
   async deleteWebhook(id: string) {
     return dbWebhooks.deleteWebhook(id);
@@ -703,6 +708,10 @@ export class ApiStore implements TelephonyStore {
   }
   async listWebhooks() {
     return this.listAll<Webhook>("webhooks");
+  }
+  async listWebhookDispatchTargets() {
+    const res = await this.cloud.transport.get<{ items?: WebhookDispatchTarget[] }>("/internal/webhook-dispatch-targets");
+    return res.items ?? [];
   }
   async deleteWebhook(id: string) {
     await this.cloud.delete("webhooks", id);

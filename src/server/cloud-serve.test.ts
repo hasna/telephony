@@ -9,6 +9,7 @@ import type { PoolQueryClient } from "../generated/storage-kit/index.js";
 // -------------------------------------------------------------------------
 function makeShimClient(): PoolQueryClient {
   const contacts: Record<string, Record<string, unknown>>[] = [] as never;
+  const webhooks: Record<string, unknown>[] = [];
   const rows: Record<string, unknown>[] = [];
 
   const run = (sql: string, params: readonly unknown[] = []): { rows: Record<string, unknown>[]; rowCount: number } => {
@@ -48,6 +49,34 @@ function makeShimClient(): PoolQueryClient {
       const idx = rows.findIndex((r) => r.id === params[0]);
       if (idx >= 0) {
         rows.splice(idx, 1);
+        return { rows: [], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    }
+    if (s.startsWith("insert into webhooks")) {
+      const now = new Date();
+      const row = {
+        id: params[0],
+        url: params[1],
+        events: params[2],
+        secret: params[3] ?? null,
+        active: true,
+        created_at: now,
+      };
+      webhooks.push(row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (s.startsWith("select * from webhooks where id")) {
+      const found = webhooks.find((r) => r.id === params[0]);
+      return { rows: found ? [found] : [], rowCount: found ? 1 : 0 };
+    }
+    if (s.startsWith("select * from webhooks")) {
+      return { rows: [...webhooks], rowCount: webhooks.length };
+    }
+    if (s.startsWith("delete from webhooks where id")) {
+      const idx = webhooks.findIndex((r) => r.id === params[0]);
+      if (idx >= 0) {
+        webhooks.splice(idx, 1);
         return { rows: [], rowCount: 1 };
       }
       return { rows: [], rowCount: 0 };
@@ -183,6 +212,77 @@ describe("telephony cloud serve", () => {
 
     const gone = await handler(new Request(`http://x/v1/contacts/${contact.id}`, { headers: auth }));
     expect(gone.status).toBe(404);
+  });
+
+  it("never exposes webhook signing secrets from create/get/list responses", async () => {
+    const handler = createServeHandler(deps());
+    const key = mintApiKey({ app: "telephony", scopes: ["telephony:*"], signingSecret: SIGNING }).token;
+    const auth = { "x-api-key": key, "content-type": "application/json" };
+
+    const created = await handler(
+      new Request("http://x/v1/webhooks", {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({
+          url: "https://example.com/hook",
+          events: ["sms.inbound"],
+          secret: "synthetic-signing-secret",
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const createdBody = (await created.json()) as Record<string, unknown>;
+    expect(createdBody.secret_configured).toBe(true);
+    expect(createdBody.secret).toBeUndefined();
+
+    const got = await handler(new Request(`http://x/v1/webhooks/${createdBody.id}`, { headers: auth }));
+    expect(got.status).toBe(200);
+    const gotBody = (await got.json()) as Record<string, unknown>;
+    expect(gotBody.secret_configured).toBe(true);
+    expect(gotBody.secret).toBeUndefined();
+
+    const listed = await handler(new Request("http://x/v1/webhooks", { headers: auth }));
+    expect(listed.status).toBe(200);
+    const listedBody = (await listed.json()) as { items: Record<string, unknown>[] };
+    expect(listedBody.items[0]!.secret_configured).toBe(true);
+    expect(listedBody.items[0]!.secret).toBeUndefined();
+  });
+
+  it("keeps signing secrets behind the private dispatch-target scope", async () => {
+    const handler = createServeHandler(deps());
+    const writer = mintApiKey({ app: "telephony", scopes: ["telephony:write"], signingSecret: SIGNING }).token;
+    const reader = mintApiKey({ app: "telephony", scopes: ["telephony:read"], signingSecret: SIGNING }).token;
+    const dispatcher = mintApiKey({
+      app: "telephony",
+      scopes: ["telephony:dispatch"],
+      signingSecret: SIGNING,
+    }).token;
+
+    const created = await handler(
+      new Request("http://x/v1/webhooks", {
+        method: "POST",
+        headers: { "x-api-key": writer, "content-type": "application/json" },
+        body: JSON.stringify({
+          url: "https://example.com/hook",
+          events: ["sms.inbound"],
+          secret: "synthetic-signing-secret",
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+
+    const readOnly = await handler(
+      new Request("http://x/v1/internal/webhook-dispatch-targets", { headers: { "x-api-key": reader } }),
+    );
+    expect(readOnly.status).toBe(403);
+
+    const privateList = await handler(
+      new Request("http://x/v1/internal/webhook-dispatch-targets", { headers: { "x-api-key": dispatcher } }),
+    );
+    expect(privateList.status).toBe(200);
+    const privateBody = (await privateList.json()) as { items: Record<string, unknown>[] };
+    expect(privateBody.items[0]!.secret_configured).toBe(true);
+    expect(privateBody.items[0]!.secret).toBe("synthetic-signing-secret");
   });
 
   // -----------------------------------------------------------------------

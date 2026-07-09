@@ -1,13 +1,10 @@
-// Outbound webhook dispatch — reads the registered webhook targets through the
-// Store so it honours the client-flip env. On a machine flipped to cloud
-// (HASNA_TELEPHONY_API_URL + API_KEY), the targets come from the cloud API, not
-// local sqlite; in local mode they come from on-box sqlite. This is the same
-// transport the inbound handlers write through, so there is no split-brain.
+// Outbound webhook dispatch goes through the Store so cloud/self_hosted webhook
+// receivers use cloud-registered targets, while public webhook DTOs stay redacted.
 
 import { getStore } from "./store/index.js";
 
 export async function dispatchWebhook(event: string, payload: unknown): Promise<void> {
-  const all = await getStore().listWebhooks();
+  const all = await getStore().listWebhookDispatchTargets();
   const targets = all.filter((w) => w.active && (w.events.length === 0 || w.events.includes(event)));
   for (const wh of targets) {
     try {
