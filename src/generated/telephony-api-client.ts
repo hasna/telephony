@@ -2,7 +2,7 @@
 // DO NOT EDIT. Regenerate: bun scripts/generate-sdk.mjs
 
 // @generated from OpenAPI by @hasna/contracts SDK generator — DO NOT EDIT.
-// Source: Telephony 0.2.7
+// Source: Telephony 0.2.8
 
 export interface Contact { "id": string; "name": string; "phone": string; "email"?: string | null; "agent_id"?: string | null; "project_id"?: string | null; "notes"?: string | null; "tags": Array<string>; "metadata": Record<string, unknown>; "created_at": string; "updated_at": string }
 
