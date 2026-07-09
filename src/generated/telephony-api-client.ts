@@ -30,7 +30,7 @@ export interface ScheduleInput { "name": string; "cron_expression": string; "com
 
 export interface ScheduleList { "items": Array<Schedule>; "total": number }
 
-export interface Webhook { "id": string; "url": string; "events": Array<string>; "secret"?: string | null; "active": boolean; "created_at": string }
+export interface Webhook { "id": string; "url": string; "events": Array<string>; "secret_configured": boolean; "active": boolean; "created_at": string }
 
 export interface WebhookInput { "url": string; "events"?: Array<string>; "secret"?: string | null }
 

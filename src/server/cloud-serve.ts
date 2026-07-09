@@ -306,7 +306,7 @@ function mapWebhook(r: Row) {
     id: String(r.id),
     url: String(r.url ?? ""),
     events: parseJson<string[]>(r.events, []),
-    secret: (r.secret as string | null) ?? null,
+    secret_configured: Boolean(r.secret),
     active: Boolean(r.active),
     created_at: iso(r.created_at),
   };
@@ -1179,11 +1179,11 @@ export function telephonyOpenApi(version: string): Record<string, unknown> {
       id: str,
       url: str,
       events: { type: "array", items: str },
-      secret: strN,
+      secret_configured: { type: "boolean" },
       active: { type: "boolean" },
       created_at: str,
     },
-    required: ["id", "url", "events", "active", "created_at"],
+    required: ["id", "url", "events", "secret_configured", "active", "created_at"],
   };
   const phoneNumber = {
     type: "object",
