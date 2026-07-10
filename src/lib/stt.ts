@@ -15,7 +15,9 @@ export async function transcribe(audioFilePath: string): Promise<TranscriptionRe
   const ext = audioFilePath.split(".").pop() || "mp3";
   const mimeType = ext === "wav" ? "audio/wav" : ext === "ogg" ? "audio/ogg" : "audio/mpeg";
   formData.append("file", new Blob([audioData], { type: mimeType }), `audio.${ext}`);
-  formData.append("model", "scribe_v1");
+  // ElevenLabs speech-to-text requires the multipart field `model_id` (not
+  // `model`); sending `model` returns HTTP 422.
+  formData.append("model_id", "scribe_v1");
 
   const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
     method: "POST",
@@ -43,7 +45,7 @@ export async function transcribeUrl(url: string): Promise<TranscriptionResult> {
 
   const formData = new FormData();
   formData.append("file", new Blob([audioData], { type: "audio/mpeg" }), "audio.mp3");
-  formData.append("model", "scribe_v1");
+  formData.append("model_id", "scribe_v1");
 
   const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
     method: "POST",

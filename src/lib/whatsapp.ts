@@ -1,5 +1,5 @@
 import { getTwilioClient, getDefaultPhoneNumber } from "./twilio.js";
-import { createMessage, updateMessageStatus } from "../db/messages.js";
+import { getStore } from "./store/index.js";
 import type { Message } from "../types/index.js";
 
 function whatsappNumber(number: string): string {
@@ -14,11 +14,12 @@ export async function sendWhatsApp(options: {
   agent_id?: string;
   project_id?: string;
 }): Promise<Message> {
+  const store = getStore();
   const client = getTwilioClient();
   const from = whatsappNumber(options.from || getDefaultPhoneNumber());
   const to = whatsappNumber(options.to);
 
-  const msg = createMessage({
+  const msg = await store.createMessage({
     type: "whatsapp_outbound",
     from_number: from,
     to_number: to,
@@ -30,10 +31,10 @@ export async function sendWhatsApp(options: {
 
   try {
     const twilioMsg = await client.messages.create({ to, from, body: options.body });
-    updateMessageStatus(msg.id, "sent");
+    await store.updateMessageStatus(msg.id, "sent");
     return { ...msg, status: "sent", twilio_sid: twilioMsg.sid };
   } catch (err: any) {
-    updateMessageStatus(msg.id, "failed", err.message);
+    await store.updateMessageStatus(msg.id, "failed", err.message);
     return { ...msg, status: "failed", error_message: err.message };
   }
 }
@@ -46,11 +47,12 @@ export async function sendWhatsAppAudio(options: {
   agent_id?: string;
   project_id?: string;
 }): Promise<Message> {
+  const store = getStore();
   const client = getTwilioClient();
   const from = whatsappNumber(options.from || getDefaultPhoneNumber());
   const to = whatsappNumber(options.to);
 
-  const msg = createMessage({
+  const msg = await store.createMessage({
     type: "whatsapp_outbound",
     from_number: from,
     to_number: to,
@@ -68,10 +70,10 @@ export async function sendWhatsAppAudio(options: {
       body: options.body || "",
       mediaUrl: [options.media_url],
     });
-    updateMessageStatus(msg.id, "sent");
+    await store.updateMessageStatus(msg.id, "sent");
     return { ...msg, status: "sent", twilio_sid: twilioMsg.sid };
   } catch (err: any) {
-    updateMessageStatus(msg.id, "failed", err.message);
+    await store.updateMessageStatus(msg.id, "failed", err.message);
     return { ...msg, status: "failed", error_message: err.message };
   }
 }
@@ -86,8 +88,8 @@ export interface InboundWhatsAppPayload {
   MediaContentType0?: string;
 }
 
-export function handleInboundWhatsApp(payload: InboundWhatsAppPayload, agentId?: string, projectId?: string): Message {
-  return createMessage({
+export async function handleInboundWhatsApp(payload: InboundWhatsAppPayload, agentId?: string, projectId?: string): Promise<Message> {
+  return getStore().createMessage({
     type: "whatsapp_inbound",
     from_number: payload.From,
     to_number: payload.To,

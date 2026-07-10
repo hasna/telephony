@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { computeTwilioSignature, resetTelephonySafetyState } from "../lib/safety.js";
+import { resetStore } from "../lib/store/index.js";
 
 let server: ReturnType<typeof Bun.serve> | undefined;
 let tempDir: string | undefined;
@@ -16,6 +17,25 @@ const originalProviderMode = process.env.TELEPHONY_PROVIDER_MODE;
 const originalDailyQuota = process.env.TELEPHONY_MAX_DAILY_MUTATIONS_PER_DESTINATION;
 const originalQuotaWindow = process.env.TELEPHONY_MUTATION_QUOTA_WINDOW_MS;
 const originalRetention = process.env.TELEPHONY_OPERATION_RETENTION_MS;
+const clientStoreEnvNames = [
+  "HASNA_TELEPHONY_STORAGE_MODE",
+  "HASNA_TELEPHONY_MODE",
+  "HASNA_TELEPHONY_API_URL",
+  "HASNA_TELEPHONY_API_KEY",
+  "TELEPHONY_API_URL",
+  "TELEPHONY_API_KEY",
+] as const;
+const originalClientStoreEnv = new Map(clientStoreEnvNames.map((name) => [name, process.env[name]]));
+
+function clearClientStoreEnv(): void {
+  for (const name of clientStoreEnvNames) delete process.env[name];
+  resetStore();
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 function restCredential(): string {
   return ["test", "rest", "credential"].join("-");
@@ -30,6 +50,7 @@ function authHeaders(): Record<string, string> {
 }
 
 function startIsolatedServer() {
+  clearClientStoreEnv();
   tempDir = mkdtempSync(join(tmpdir(), "telephony-server-test-"));
   process.env.HASNA_TELEPHONY_DB_PATH = join(tempDir, "telephony.db");
   Object.assign(process.env, { [restCredentialEnvName]: restCredential() });
@@ -48,6 +69,7 @@ afterEach(async () => {
   const { closeDatabase } = await import("../db/database.js");
   stopScheduler();
   closeDatabase();
+  resetStore();
 
   if (originalDbPath === undefined) delete process.env.HASNA_TELEPHONY_DB_PATH;
   else process.env.HASNA_TELEPHONY_DB_PATH = originalDbPath;
@@ -63,6 +85,8 @@ afterEach(async () => {
   else process.env.TELEPHONY_MUTATION_QUOTA_WINDOW_MS = originalQuotaWindow;
   if (originalRetention === undefined) delete process.env.TELEPHONY_OPERATION_RETENTION_MS;
   else process.env.TELEPHONY_OPERATION_RETENTION_MS = originalRetention;
+  for (const name of clientStoreEnvNames) restoreEnv(name, originalClientStoreEnv.get(name));
+  resetStore();
 
   if (tempDir) {
     rmSync(tempDir, { recursive: true, force: true });
@@ -125,8 +149,7 @@ describe("REST API request parsing", () => {
 
 describe("REST and Twilio safety gates", () => {
   it("rejects REST API requests when no API key is configured", async () => {
-    tempDir = mkdtempSync(join(tmpdir(), "telephony-server-test-"));
-    process.env.HASNA_TELEPHONY_DB_PATH = join(tempDir, "telephony.db");
+    startIsolatedServer();
     delete process.env[restCredentialEnvName];
 
     const { createServer } = await import("./serve.js");
@@ -346,8 +369,7 @@ describe("REST and Twilio safety gates", () => {
   });
 
   it("rejects unsigned Twilio webhooks before inbound messages are written", async () => {
-    tempDir = mkdtempSync(join(tmpdir(), "telephony-server-test-"));
-    process.env.HASNA_TELEPHONY_DB_PATH = join(tempDir, "telephony.db");
+    startIsolatedServer();
     Object.assign(process.env, { [twilioCredentialEnvName]: webhookCredential() });
 
     const { createServer } = await import("./serve.js");
@@ -365,8 +387,7 @@ describe("REST and Twilio safety gates", () => {
   });
 
   it("accepts one signed Twilio webhook and rejects replayed ids", async () => {
-    tempDir = mkdtempSync(join(tmpdir(), "telephony-server-test-"));
-    process.env.HASNA_TELEPHONY_DB_PATH = join(tempDir, "telephony.db");
+    startIsolatedServer();
     Object.assign(process.env, { [twilioCredentialEnvName]: webhookCredential() });
 
     const { createServer } = await import("./serve.js");
@@ -398,5 +419,55 @@ describe("REST and Twilio safety gates", () => {
 
     expect(replay.status).toBe(409);
     expect(listMessages()).toHaveLength(1);
+  });
+});
+
+describe("cloud-flip read routing", () => {
+  const apiUrlEnv = ["HASNA", "TELEPHONY", "API", "URL"].join("_");
+  const apiKeyEnv = ["HASNA", "TELEPHONY", "API", "KEY"].join("_");
+
+  it("serves REST read routes from the Store (cloud) — not local sqlite — when flipped", async () => {
+    // A machine flipped to cloud runs `telephony serve` as a webhook receiver +
+    // dashboard. Its read routes MUST come from the SAME cloud store the inbound
+    // handlers write to; reading local sqlite here is the split-brain bug.
+    const seenPaths: string[] = [];
+    const cloud = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const u = new URL(req.url);
+        seenPaths.push(`${req.method} ${u.pathname}`);
+        if (req.method === "GET" && u.pathname === "/v1/messages") {
+          return new Response(JSON.stringify({ items: [{ id: "cloud-msg-1", body: "from cloud" }] }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ items: [] }), { headers: { "Content-Type": "application/json" } });
+      },
+    });
+
+    // Isolated (empty) local DB so any accidental local read would return [].
+    tempDir = mkdtempSync(join(tmpdir(), "telephony-server-test-"));
+    process.env.HASNA_TELEPHONY_DB_PATH = join(tempDir, "telephony.db");
+    Object.assign(process.env, { [restCredentialEnvName]: restCredential() });
+    process.env[apiUrlEnv] = `http://127.0.0.1:${cloud.port}`;
+    process.env[apiKeyEnv] = ["test", "cloud", "key"].join("-");
+
+    resetStore();
+
+    try {
+      const { createServer } = await import("./serve.js");
+      server = createServer(0);
+
+      const res = await fetch(`http://127.0.0.1:${server.port}/api/messages`, { headers: authHeaders() });
+      expect(res.status).toBe(200);
+      // The row came from the cloud stub, proving the read routed through the Store.
+      expect(await res.json()).toEqual([{ id: "cloud-msg-1", body: "from cloud" }]);
+      expect(seenPaths).toContain("GET /v1/messages");
+    } finally {
+      cloud.stop(true);
+      delete process.env[apiUrlEnv];
+      delete process.env[apiKeyEnv];
+      resetStore();
+    }
   });
 });

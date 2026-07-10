@@ -385,9 +385,13 @@ export interface Webhook {
   id: string;
   url: string;
   events: string[];
-  secret: string | null;
+  secret_configured: boolean;
   active: boolean;
   created_at: string;
+}
+
+export interface WebhookDispatchTarget extends Webhook {
+  secret: string | null;
 }
 
 export interface WebhookRow {

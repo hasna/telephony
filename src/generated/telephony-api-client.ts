@@ -2,7 +2,7 @@
 // DO NOT EDIT. Regenerate: bun scripts/generate-sdk.mjs
 
 // @generated from OpenAPI by @hasna/contracts SDK generator — DO NOT EDIT.
-// Source: Telephony 0.1.14
+// Source: Telephony 0.2.8
 
 export interface Contact { "id": string; "name": string; "phone": string; "email"?: string | null; "agent_id"?: string | null; "project_id"?: string | null; "notes"?: string | null; "tags": Array<string>; "metadata": Record<string, unknown>; "created_at": string; "updated_at": string }
 
@@ -20,7 +20,7 @@ export interface ProjectList { "items": Array<Project>; "total": number }
 
 export interface Agent { "id": string; "name": string; "description"?: string | null; "session_id"?: string | null; "project_id"?: string | null; "capabilities"?: Array<string>; "permissions"?: Array<string>; "status": string; "metadata"?: Record<string, unknown>; "last_seen_at"?: string; "created_at": string; "updated_at": string }
 
-export interface AgentInput { "name": string }
+export interface AgentInput { "name": string; "description"?: string | null; "session_id"?: string | null; "project_id"?: string | null; "capabilities"?: Array<string>; "permissions"?: Array<string>; "force"?: boolean }
 
 export interface AgentList { "items": Array<Agent>; "total": number }
 
@@ -30,7 +30,7 @@ export interface ScheduleInput { "name": string; "cron_expression": string; "com
 
 export interface ScheduleList { "items": Array<Schedule>; "total": number }
 
-export interface Webhook { "id": string; "url": string; "events": Array<string>; "secret"?: string | null; "active": boolean; "created_at": string }
+export interface Webhook { "id": string; "url": string; "events": Array<string>; "secret_configured": boolean; "active": boolean; "created_at": string }
 
 export interface WebhookInput { "url": string; "events"?: Array<string>; "secret"?: string | null }
 
@@ -108,10 +108,10 @@ export class TelephonyApiClient {
   }
 
     /** List agents */
-    async listAgents(init?: RequestInit): Promise<AgentList> {
+    async listAgents(query?: { "agent_id"?: string; "project_id"?: string }, init?: RequestInit): Promise<AgentList> {
       return this.request("GET", `/v1/agents`, {
         body: undefined,
-        query: undefined,
+        query,
         init,
       });
     }
@@ -120,6 +120,15 @@ export class TelephonyApiClient {
     async registerAgent(body: AgentInput, init?: RequestInit): Promise<Agent> {
       return this.request("POST", `/v1/agents`, {
         body,
+        query: undefined,
+        init,
+      });
+    }
+
+    /** Fetch an agent by id */
+    async getAgent(id: string, init?: RequestInit): Promise<Agent> {
+      return this.request("GET", `/v1/agents/${encodeURIComponent(String(id))}`, {
+        body: undefined,
         query: undefined,
         init,
       });
@@ -135,7 +144,7 @@ export class TelephonyApiClient {
     }
 
     /** List contacts */
-    async listContacts(query?: { "limit"?: number; "offset"?: number; "search"?: string }, init?: RequestInit): Promise<ContactList> {
+    async listContacts(query?: { "limit"?: number; "offset"?: number; "search"?: string; "agent_id"?: string; "project_id"?: string }, init?: RequestInit): Promise<ContactList> {
       return this.request("GET", `/v1/contacts`, {
         body: undefined,
         query,
@@ -180,7 +189,7 @@ export class TelephonyApiClient {
     }
 
     /** List messages */
-    async listMessages(query?: { "limit"?: number }, init?: RequestInit): Promise<MessageList> {
+    async listMessages(query?: { "limit"?: number; "agent_id"?: string; "project_id"?: string; "type"?: string; "search"?: string; "number"?: string }, init?: RequestInit): Promise<MessageList> {
       return this.request("GET", `/v1/messages`, {
         body: undefined,
         query,
@@ -189,10 +198,28 @@ export class TelephonyApiClient {
     }
 
     /** List phone numbers */
-    async listNumbers(query?: { "limit"?: number }, init?: RequestInit): Promise<PhoneNumberList> {
+    async listNumbers(query?: { "limit"?: number; "agent_id"?: string; "project_id"?: string; "status"?: string; "number"?: string }, init?: RequestInit): Promise<PhoneNumberList> {
       return this.request("GET", `/v1/numbers`, {
         body: undefined,
         query,
+        init,
+      });
+    }
+
+    /** Search available phone numbers to buy (server-side Twilio proxy) */
+    async searchAvailableNumbers(query?: { "country"?: string; "area_code"?: string; "contains"?: string; "sms_enabled"?: boolean; "voice_enabled"?: boolean; "limit"?: number }, init?: RequestInit): Promise<{ "items"?: Array<{ "phoneNumber"?: string; "friendlyName"?: string; "locality"?: string; "region"?: string; "capabilities"?: { "voice"?: boolean; "sms"?: boolean; "mms"?: boolean } }>; "total"?: number }> {
+      return this.request("GET", `/v1/numbers/available`, {
+        body: undefined,
+        query,
+        init,
+      });
+    }
+
+    /** List numbers owned in the Twilio account (server-side Twilio proxy) */
+    async listTwilioNumbers(init?: RequestInit): Promise<{ "items"?: Array<{ "sid"?: string; "phoneNumber"?: string; "friendlyName"?: string }>; "total"?: number }> {
+      return this.request("GET", `/v1/numbers/twilio`, {
+        body: undefined,
+        query: undefined,
         init,
       });
     }
@@ -234,10 +261,10 @@ export class TelephonyApiClient {
     }
 
     /** List schedules */
-    async listSchedules(init?: RequestInit): Promise<ScheduleList> {
+    async listSchedules(query?: { "agent_id"?: string; "project_id"?: string; "enabled"?: boolean }, init?: RequestInit): Promise<ScheduleList> {
       return this.request("GET", `/v1/schedules`, {
         body: undefined,
-        query: undefined,
+        query,
         init,
       });
     }
@@ -252,10 +279,19 @@ export class TelephonyApiClient {
     }
 
     /** List voicemails */
-    async listVoicemails(query?: { "limit"?: number }, init?: RequestInit): Promise<VoicemailList> {
+    async listVoicemails(query?: { "limit"?: number; "agent_id"?: string; "project_id"?: string; "listened"?: boolean }, init?: RequestInit): Promise<VoicemailList> {
       return this.request("GET", `/v1/voicemails`, {
         body: undefined,
         query,
+        init,
+      });
+    }
+
+    /** List available TTS voices (server-side ElevenLabs proxy) */
+    async listVoices(init?: RequestInit): Promise<{ "items"?: Array<{ "voice_id"?: string; "name"?: string; "category"?: string; "description"?: string }>; "total"?: number }> {
+      return this.request("GET", `/v1/voices`, {
+        body: undefined,
+        query: undefined,
         init,
       });
     }

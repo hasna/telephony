@@ -1,110 +1,140 @@
+// @hasna/telephony — embeddable SDK.
+//
+// Every method routes through the single Store abstraction (getStore) and the
+// provider lib actions. This means the SDK works IDENTICALLY in `local` mode
+// (on-box SQLite) and in `self_hosted`/`cloud` mode (the /v1 HTTP API with a
+// bearer key) — resolved from the client-flip env — WITHOUT requiring a running
+// local REST server. No SDK method touches sqlite or fetch directly.
+
+import { getStore, type TelephonyStore } from "./lib/store/index.js";
+import { sendSms as sendSmsAction } from "./lib/sms.js";
+import { sendWhatsApp as sendWhatsAppAction, sendWhatsAppAudio as sendWhatsAppAudioAction } from "./lib/whatsapp.js";
+import { makeCall as makeCallAction } from "./lib/voice.js";
+import { searchAvailableNumbers as searchAvailableNumbersAction, provisionNumber as provisionNumberAction, releaseNumber as releaseNumberAction } from "./lib/provisioning.js";
+import { generateSpeech, listVoices as listVoicesAction } from "./lib/tts.js";
+import { generateSchedule, generateMessage, analyzeIncomingMessage } from "./lib/cerebras.js";
+import pkg from "../package.json";
+import type { RegisterAgentInput } from "./types/index.js";
+
 export interface TelephonyClientOptions {
-  baseUrl?: string;
+  /**
+   * Optional environment override for Store resolution (mode/URL/key). Defaults
+   * to `process.env`. There is NO baseUrl/DSN option: the transport (local vs
+   * cloud) is resolved from the client-flip env, never a raw connection string.
+   */
+  env?: Record<string, string | undefined>;
 }
 
 export class TelephonyClient {
-  private baseUrl: string;
+  private readonly store: TelephonyStore;
 
   constructor(options: TelephonyClientOptions = {}) {
-    this.baseUrl = (options.baseUrl || "http://localhost:19451").replace(/\/$/, "");
+    this.store = getStore(options.env);
   }
 
-  private async request(path: string, options?: RequestInit): Promise<any> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers: { "Content-Type": "application/json", ...options?.headers },
-    });
-    if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
-    return res.json();
-  }
-
+  // ── Messaging ──────────────────────────────────────────────────────────────
   async sendSms(to: string, body: string, from?: string) {
-    return this.request("/api/sms/send", { method: "POST", body: JSON.stringify({ to, body, from }) });
+    return sendSmsAction({ to, body, from });
   }
-
   async sendWhatsApp(to: string, body: string, from?: string) {
-    return this.request("/api/whatsapp/send", { method: "POST", body: JSON.stringify({ to, body, from }) });
+    return sendWhatsAppAction({ to, body, from });
   }
-
   async sendWhatsAppAudio(to: string, mediaUrl: string, body?: string) {
-    return this.request("/api/whatsapp/send-audio", { method: "POST", body: JSON.stringify({ to, media_url: mediaUrl, body }) });
+    return sendWhatsAppAudioAction({ to, media_url: mediaUrl, body });
   }
-
   async makeCall(to: string, from?: string, twiml?: string) {
-    return this.request("/api/call/make", { method: "POST", body: JSON.stringify({ to, from, twiml }) });
+    return makeCallAction({ to, from, twiml });
   }
-
   async listMessages(options?: { agent_id?: string; limit?: number }) {
-    const params = new URLSearchParams();
-    if (options?.agent_id) params.set("agent_id", options.agent_id);
-    if (options?.limit) params.set("limit", String(options.limit));
-    return this.request(`/api/messages?${params}`);
+    return this.store.listMessages(options);
   }
-
   async searchMessages(query: string) {
-    return this.request(`/api/messages/search?q=${encodeURIComponent(query)}`);
+    return this.store.searchMessages(query);
   }
-
   async getConversation(phone: string) {
-    return this.request(`/api/conversation/${encodeURIComponent(phone)}`);
+    return this.store.getConversation(phone);
   }
 
-  async listCalls() { return this.request("/api/calls"); }
-  async listVoicemails() { return this.request("/api/voicemails"); }
-  async listNumbers() { return this.request("/api/numbers"); }
+  // ── Calls / voicemail ────────────────────────────────────────────────────────
+  async listCalls() {
+    return this.store.listCalls();
+  }
+  async listVoicemails() {
+    return this.store.listVoicemails();
+  }
 
+  // ── Numbers ──────────────────────────────────────────────────────────────────
+  async listNumbers() {
+    return this.store.listPhoneNumbers();
+  }
   async searchAvailableNumbers(options: { country?: string; area_code?: string }) {
-    return this.request("/api/numbers/search", { method: "POST", body: JSON.stringify(options) });
+    return searchAvailableNumbersAction(options);
   }
-
   async provisionNumber(phoneNumber: string, agentId?: string) {
-    return this.request("/api/numbers/provision", { method: "POST", body: JSON.stringify({ phone_number: phoneNumber, agent_id: agentId }) });
+    return provisionNumberAction({ phone_number: phoneNumber, agent_id: agentId });
   }
-
   async releaseNumber(number: string) {
-    return this.request("/api/numbers/release", { method: "POST", body: JSON.stringify({ number }) });
+    return releaseNumberAction(number);
   }
 
-  async listAgents() { return this.request("/api/agents"); }
-
-  async registerAgent(name: string, options?: { description?: string; session_id?: string }) {
-    return this.request("/api/agents/register", { method: "POST", body: JSON.stringify({ name, ...options }) });
+  // ── Agents / projects / contacts ──────────────────────────────────────────────
+  async listAgents() {
+    return this.store.listAgents();
   }
-
+  async registerAgent(name: string, options?: Omit<RegisterAgentInput, "name">) {
+    return this.store.registerAgent({ name, ...options });
+  }
   async heartbeat(agentId: string) {
-    return this.request("/api/agents/heartbeat", { method: "POST", body: JSON.stringify({ agent_id: agentId }) });
+    return this.store.heartbeat(agentId);
   }
-
-  async listProjects() { return this.request("/api/projects"); }
+  async listProjects() {
+    return this.store.listProjects();
+  }
   async createProject(name: string, path: string, description?: string) {
-    return this.request("/api/projects", { method: "POST", body: JSON.stringify({ name, path, description }) });
+    return this.store.createProject({ name, path, description });
+  }
+  async listContacts() {
+    return this.store.listContacts();
+  }
+  async searchContacts(query: string) {
+    return this.store.searchContacts(query);
   }
 
-  async listContacts() { return this.request("/api/contacts"); }
-  async searchContacts(query: string) { return this.request(`/api/contacts/search?q=${encodeURIComponent(query)}`); }
-
-  async listSchedules() { return this.request("/api/schedules"); }
+  // ── Schedules ─────────────────────────────────────────────────────────────────
+  async listSchedules() {
+    return this.store.listSchedules();
+  }
   async createScheduleAI(description: string) {
-    return this.request("/api/schedules/ai", { method: "POST", body: JSON.stringify({ description }) });
+    const parsed = await generateSchedule(description);
+    return this.store.createSchedule({
+      name: parsed.description,
+      cron_expression: parsed.cron_expression,
+      action: parsed.action as any,
+      command: parsed.command,
+      parameters: parsed.parameters,
+    });
   }
 
+  // ── TTS / AI ──────────────────────────────────────────────────────────────────
   async tts(text: string, voiceId?: string) {
-    return this.request("/api/tts", { method: "POST", body: JSON.stringify({ text, voice_id: voiceId }) });
+    return generateSpeech({ text, voice_id: voiceId });
   }
-
-  async listVoices() { return this.request("/api/voices"); }
-
+  async listVoices() {
+    return listVoicesAction();
+  }
   async aiMessage(context: string, instruction: string, tone?: string) {
-    return this.request("/api/ai/message", { method: "POST", body: JSON.stringify({ context, instruction, tone }) });
+    return { message: await generateMessage({ context, instruction, tone }) };
   }
-
   async aiAnalyze(message: string) {
-    return this.request("/api/ai/analyze", { method: "POST", body: JSON.stringify({ message }) });
+    return analyzeIncomingMessage(message);
   }
 
-  async health() { return this.request("/health"); }
+  // ── Meta ────────────────────────────────────────────────────────────────────
+  async health() {
+    return { status: "ok", version: pkg.version, transport: this.store.transport };
+  }
 }
 
-export function createClient(baseUrl?: string): TelephonyClient {
-  return new TelephonyClient({ baseUrl });
+export function createClient(options?: TelephonyClientOptions): TelephonyClient {
+  return new TelephonyClient(options);
 }

@@ -1,4 +1,4 @@
-import { getDueSchedules, markScheduleRun } from "../db/schedules.js";
+import { getStore } from "./store/index.js";
 import { sendSms } from "./sms.js";
 import { sendWhatsApp } from "./whatsapp.js";
 import { makeCall } from "./voice.js";
@@ -60,16 +60,16 @@ export async function runSchedule(schedule: Schedule): Promise<ScheduleRunResult
         break;
     }
 
-    markScheduleRun(schedule.id);
+    await getStore().markScheduleRun(schedule.id);
     return { schedule_id: schedule.id, schedule_name: schedule.name, action: schedule.action, success: true, result };
   } catch (err: any) {
-    markScheduleRun(schedule.id);
+    await getStore().markScheduleRun(schedule.id);
     return { schedule_id: schedule.id, schedule_name: schedule.name, action: schedule.action, success: false, error: err.message };
   }
 }
 
 export async function tick(): Promise<ScheduleRunResult[]> {
-  const due = getDueSchedules();
+  const due = await getStore().getDueSchedules();
   const results: ScheduleRunResult[] = [];
 
   for (const schedule of due) {

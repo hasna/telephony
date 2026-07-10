@@ -1,46 +1,38 @@
-// REST SDK Client (legacy hand-rolled client, kept for compatibility)
+// Embeddable SDK (routes through the Store — works local and self_hosted/cloud)
 export { TelephonyClient, createClient } from "./sdk.js";
 export type { TelephonyClientOptions } from "./sdk.js";
 
 // Generated typed SDK client (from the telephony-serve OpenAPI document)
 export { TelephonyApiClient } from "./generated/telephony-api-client.js";
 
-// Cloud storage (PURE REMOTE / Amendment A1)
-export { createTelephonyCloudClient, PgAdapterAsync, TELEPHONY_APP_NAME } from "./db/remote-storage.js";
+// ── The single Store abstraction (LocalStore + ApiStore) ─────────────────────
+// EVERY read/write goes through this. `getStore()` resolves local vs cloud from
+// the client-flip env. Callers never touch sqlite or fetch directly.
+export {
+  getStore,
+  resetStore,
+  isCloudStore,
+  LocalStore,
+  ApiStore,
+  CloudUnsupportedError,
+  TELEPHONY_APP,
+} from "./lib/store/index.js";
+export type {
+  TelephonyStore,
+  CreateMessageInput,
+  CreateCallInput,
+  CreateVoicemailInput,
+  CreatePhoneNumberInput,
+  FeedbackInput,
+  MessageFilters,
+  CallFilters,
+  VoicemailFilters,
+  ScheduleFilters,
+} from "./lib/store/index.js";
+
+// Server bootstrap + cloud storage (self_hosted service side, PURE REMOTE)
+export { createTelephonyCloudClient, TELEPHONY_APP_NAME } from "./db/remote-storage.js";
 export { telephonyOpenApi, startTelephonyServe, createServeHandler, TELEPHONY_SERVE_APP } from "./server/cloud-serve.js";
-
-// Core database
-export { getDatabase, closeDatabase, resetDatabase, resolvePartialId, now, uuid } from "./db/database.js";
-
-// Agents
-export { registerAgent, getAgent, getAgentByName, listAgents, heartbeat, releaseAgent, deleteAgent } from "./db/agents.js";
-
-// Projects
-export { createProject, getProject, getProjectByPath, listProjects, updateProject, deleteProject } from "./db/projects.js";
-
-// Sessions
-export { createSession, getSession, listSessions, updateSessionActivity } from "./db/sessions.js";
-
-// Phone Numbers
-export { createPhoneNumber, getPhoneNumber, getPhoneNumberByNumber, listPhoneNumbers, assignPhoneNumber, releasePhoneNumberDb, deletePhoneNumber } from "./db/phone-numbers.js";
-
-// Messages
-export { createMessage, getMessage, listMessages, searchMessages, getConversation, updateMessageStatus } from "./db/messages.js";
-
-// Calls
-export { createCall, getCall, listCalls, updateCallStatus } from "./db/calls.js";
-
-// Voicemails
-export { createVoicemail, getVoicemail, listVoicemails, markVoicemailListened, deleteVoicemail } from "./db/voicemails.js";
-
-// Contacts
-export { createContact, getContact, listContacts, searchContacts, updateContact, deleteContact } from "./db/contacts.js";
-
-// Schedules
-export { createSchedule, getSchedule, listSchedules, enableSchedule, disableSchedule, deleteSchedule, markScheduleRun, getDueSchedules, computeNextRun } from "./db/schedules.js";
-
-// Webhooks
-export { createWebhook, getWebhook, listWebhooks, deleteWebhook, dispatchWebhook } from "./db/webhooks.js";
 
 // Lib: Twilio
 export { getTwilioClient, getDefaultPhoneNumber, hasTwilioConfig } from "./lib/twilio.js";
