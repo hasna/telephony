@@ -3,8 +3,8 @@
   "name": "telephony",
   "class": "cli-with-store",
   "contractVersion": "v1",
-  "kitVersion": "0.8.0",
-  "description": "Telephony platform for AI agents with SMS, WhatsApp, voice calls, TTS/STT, real-time streaming, and a local SQLite store.",
+  "kitVersion": "0.8.1",
+  "description": "Telephony platform for AI agents with SMS, WhatsApp, voice calls, TTS/STT, and real-time streaming. Local mode uses SQLite at ~/.hasna/telephony/telephony.db; cloud mode (HASNA_TELEPHONY_STORAGE_MODE=cloud) is PURE REMOTE per Amendment A1 — the serve process reads and writes PostgreSQL directly.",
   "bins": [
     "telephony",
     "telephony-mcp",
@@ -82,25 +82,25 @@
   "storage": {
     "mode": "local",
     "engines": [
-      "sqlite"
+      "sqlite",
+      "postgres"
     ],
     "envPrefix": "HASNA_TELEPHONY_",
     "aliasEnvPrefix": "TELEPHONY_",
-    "sqlitePath": "~/.hasna/telephony/telephony.db"
+    "sqlitePath": "~/.hasna/telephony/telephony.db",
+    "pgTestGate": {
+      "envVar": "HASNA_TELEPHONY_TEST_DATABASE_URL",
+      "command": "bun run test:pg"
+    }
   },
   "hosting": [
     "user-hosted"
   ],
   "metadata": {
-    "conformance": {
-      "waivedStorageEngines": [
-        {
-          "engine": "postgres",
-          "reason": "Telephony owns a single-operator local SQLite state store; PostgreSQL adoption is tracked through the vendored @hasna/contracts storage kit.",
-          "reviewedBy": "platform-storage",
-          "expiresAt": "2027-01-01T00:00:00.000Z"
-        }
-      ]
+    "release": {
+      "artifactScan": {
+        "script": "scan-artifact"
+      }
     }
   }
 }

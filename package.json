@@ -36,7 +36,10 @@
     "dev:serve": "bun run src/server/cloud-entry.ts",
     "dev:serve:local": "bun run src/server/index.ts",
     "migrate:cloud": "bun scripts/apply-cloud-migrations.mjs",
+    "test:pg": "bun test src/db/pg-live.test.ts",
+    "scan-artifact": "bun scripts/scan-artifact.mjs",
     "serve": "bun src/server/cloud-entry.ts",
+    "prepack": "bun run scan-artifact",
     "prepublishOnly": "bun run typecheck && bun test && bun run build",
     "postinstall": "mkdir -p $HOME/.hasna/telephony $HOME/.hasna/telephony/audio 2>/dev/null || true"
   },
