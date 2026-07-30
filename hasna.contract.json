@@ -3,16 +3,12 @@
   "name": "telephony",
   "class": "cli-with-store",
   "contractVersion": "v1",
-  "kitVersion": "0.8.1",
-  "description": "Telephony platform for AI agents with SMS, WhatsApp, voice calls, TTS/STT, and real-time streaming. Local mode uses SQLite at ~/.hasna/telephony/telephony.db; cloud mode (HASNA_TELEPHONY_STORAGE_MODE=cloud) is PURE REMOTE per Amendment A1 — the serve process reads and writes PostgreSQL directly.",
+  "kitVersion": "0.8.4",
+  "description": "Telephony platform for AI agents with SMS, WhatsApp, voice calls, TTS/STT, and real-time streaming. The data backend is the only runtime switch: SQLite at ~/.hasna/telephony/telephony.db by default, or PostgreSQL when a database URL is configured, in which case the serve process reads and writes PostgreSQL directly.",
   "bins": [
     "telephony",
     "telephony-mcp",
     "telephony-serve"
-  ],
-  "deploymentModes": [
-    "local",
-    "self_hosted"
   ],
   "serviceSurfaces": [
     {
@@ -21,10 +17,6 @@
       "status": "supported",
       "bin": "telephony-serve",
       "authMode": "api-key",
-      "deploymentModes": [
-        "local",
-        "self_hosted"
-      ],
       "health": {
         "method": "GET",
         "path": "/health",
@@ -48,10 +40,6 @@
       "kind": "sdk",
       "status": "supported",
       "authMode": "api-key",
-      "deploymentModes": [
-        "local",
-        "self_hosted"
-      ],
       "exportSubpath": ".",
       "generatedFrom": "/openapi.json",
       "clientClassName": "TelephonyApiClient"
@@ -61,26 +49,18 @@
       "kind": "cli",
       "status": "supported",
       "bin": "telephony",
-      "authMode": "local-only",
-      "deploymentModes": [
-        "local",
-        "self_hosted"
-      ]
+      "authMode": "local-only"
     },
     {
       "name": "telephony-mcp",
       "kind": "mcp",
       "status": "supported",
       "mcpBin": "telephony-mcp",
-      "authMode": "local-only",
-      "deploymentModes": [
-        "local",
-        "self_hosted"
-      ]
+      "authMode": "local-only"
     }
   ],
   "storage": {
-    "mode": "local",
+    "mode": "sqlite",
     "engines": [
       "sqlite",
       "postgres"

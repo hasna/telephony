@@ -11,11 +11,23 @@
  *      pin the specific claims that must stay true (both storage engines, no
  *      storage waiver, a live-PG gate wired to a real test, a packed-artifact
  *      scan reachable from prepack);
- *   2. the real `contracts repo-conformance` run when the CLI is installed,
- *      asserting ok:true so no check can regress unnoticed.
+ *   2. the real `contracts repo-conformance` run, asserting ok:true so no check
+ *      can regress unnoticed, against the exact kit version the manifest
+ *      declares in `kitVersion`.
  *
- * Layer 1 exists because layer 2 cannot run without the globally installed
- * `contracts` binary; a gate that silently skips is the hole this closes.
+ * Layer 1 exists because layer 2 cannot run without the `contracts` binary; a
+ * gate that silently skips is the hole this closes.
+ *
+ * The `@hasna/contracts` dependency is pinned rather than ranged on purpose:
+ * 0.8.4 is the newest kit whose checks this repo actually satisfies. 0.8.5 adds
+ * `credential_seam_compliance`, which requires importing the client credential
+ * seam from `@hasna/contracts/client` instead of the vendored fork in
+ * `src/generated/storage-client/`. Un-vendoring it changes how the CLI resolves
+ * a server connection (the fork accepts the removed `local`/`cloud`/
+ * `self_hosted` mode vocabulary; the kit accepts only the `sqlite`/`postgres`
+ * backend switch), so it is a behavioural migration tracked separately, not a
+ * dependency bump. Bump the pin and `kitVersion` together when that lands — the
+ * version assertion below makes bumping one without the other fail loudly.
  */
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
@@ -80,12 +92,63 @@ describe("hasna.contract.json", () => {
   });
 });
 
-const contractsCli = Bun.which("contracts");
+/**
+ * Resolve the conformance validator deterministically.
+ *
+ * `Bun.which` reads PATH, and only `bun run <script>` prepends
+ * `node_modules/.bin` to it. So `bun run test` graded the manifest with the
+ * version the lockfile pins while a bare `bun test` graded it with whatever
+ * `contracts` happened to be installed globally — two different schemas, two
+ * different verdicts, from the same commit. Prefer the workspace binary, and
+ * fall back to PATH only when dependencies are not installed.
+ */
+function resolveContractsCli(): string | null {
+  const workspaceBin = join(repoRoot, "node_modules", ".bin", "contracts");
+  return existsSync(workspaceBin) ? workspaceBin : Bun.which("contracts");
+}
+
+const contractsCli = resolveContractsCli();
+
+/**
+ * Keys the mode_enum_compliance check reads out of the ambient process
+ * environment. They describe the operator's shell, not this repo, so a
+ * developer exporting one must not change the verdict of a repo merge gate —
+ * that is the same ambient-state dependence this file exists to remove. Every
+ * other check reads the repo and stays inherited.
+ */
+const AMBIENT_MODE_ENV_KEYS = ["HASNA_TELEPHONY_STORAGE_MODE", "TELEPHONY_STORAGE_MODE"] as const;
+
+function repoGradingEnv(): Record<string, string | undefined> {
+  const env = { ...process.env };
+  for (const key of AMBIENT_MODE_ENV_KEYS) delete env[key];
+  return env;
+}
+
+async function runContracts(args: string[]): Promise<string> {
+  const proc = Bun.spawn([contractsCli as string, ...args], {
+    cwd: repoRoot,
+    env: repoGradingEnv(),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdout = await new Response(proc.stdout).text();
+  await proc.exited;
+  return stdout;
+}
 
 describe.skipIf(!contractsCli)("contracts repo-conformance", () => {
+  it("runs the contract kit version the manifest declares it tracks", async () => {
+    // A validator other than kitVersion grades the manifest against a schema it
+    // was not written against. Fail on the mismatch here, so bumping the
+    // dependency without reconciling the manifest is a loud error rather than a
+    // silently different verdict below.
+    expect((await runContracts(["--version"])).trim()).toBe(manifest.kitVersion);
+  });
+
   it("returns ok:true with no failing check", async () => {
     const proc = Bun.spawn([contractsCli as string, "repo-conformance", "--json"], {
       cwd: repoRoot,
+      env: repoGradingEnv(),
       stdout: "pipe",
       stderr: "pipe",
     });
