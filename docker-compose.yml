@@ -1,12 +1,12 @@
 # @hasna/telephony — local development stack.
 #
-# Provides a throwaway Postgres for exercising cloud mode (PURE REMOTE per
-# Amendment A1) against a local database instead of the shared RDS, plus the
-# telephony-serve HTTP API built from the Dockerfile.
+# Provides a throwaway Postgres for exercising the `postgres` storage backend
+# against a local database instead of a real server, plus the telephony-serve
+# HTTP API built from the Dockerfile.
 #
 #   # 1. bring up postgres and apply the schema (owner == superuser locally)
 #   docker compose up -d postgres
-#   HASNA_TELEPHONY_STORAGE_MODE=cloud \
+#   HASNA_TELEPHONY_STORAGE_MODE=postgres \
 #     HASNA_TELEPHONY_DATABASE_URL=postgres://telephony:telephony@localhost:5432/telephony?sslmode=disable \
 #     bun scripts/apply-cloud-migrations.mjs
 #   # 2. build + start the service
@@ -41,7 +41,7 @@ services:
         condition: service_healthy
     environment:
       PORT: "8080"
-      HASNA_TELEPHONY_STORAGE_MODE: cloud
+      HASNA_TELEPHONY_STORAGE_MODE: postgres
       HASNA_TELEPHONY_DATABASE_URL: postgres://telephony:telephony@postgres:5432/telephony?sslmode=disable
       # Local-only throwaway signing secret. Use a real secret in production.
       HASNA_TELEPHONY_API_SIGNING_KEY: local-dev-signing-secret-change-me

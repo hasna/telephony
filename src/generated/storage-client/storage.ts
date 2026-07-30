@@ -1,6 +1,6 @@
 // HTTP storage client for the Hasna Service Contract v1.
 //
-// This is the piece that makes `mode=self_hosted` real for a client. It sits on
+// This is the piece that makes the `postgres` backend real for a client. It sits on
 // top of `createHasnaHttpTransport` and implements the generic resource CRUD
 // vocabulary every Hasna serve app exposes under `/v1`:
 //
@@ -11,8 +11,8 @@
 //   delete -> DELETE /v1/<resource>/<id>       -> void       (204/404 => ok)
 //
 // An app's storage resolver selects this client when the client-flip contract
-// resolves to `cloud-http` (mode=cloud/self_hosted AND API_URL+API_KEY set), and
-// falls through to the local store otherwise. See `resolveClientTransport` /
+// resolves to `cloud-http` (backend=postgres AND API_URL+API_KEY set), and falls
+// through to the on-box store otherwise. See `resolveClientTransport` /
 // `createClientTransport` in ./transport.ts.
 //
 // Guarantees carried up from the transport: JSON in/out, per-request timeout,
@@ -211,11 +211,11 @@ export type ResolveStorageClientResult =
 
 /**
  * The one call an app's storage resolver makes. Reads the client-flip env for
- * `name`; when it resolves to `cloud-http` (mode=cloud/self_hosted + API_URL +
+ * `name`; when it resolves to `cloud-http` (backend=postgres + API_URL +
  * API_KEY), returns a ready {@link HasnaStorageClient}. Otherwise returns
- * `{ transport: 'local', client: null }` so the app uses its local store.
- * Throws if cloud was requested but is misconfigured (so callers never silently
- * read the wrong dataset).
+ * `{ transport: 'local', client: null }` so the app uses its on-box store.
+ * Throws if the server backend was requested but is misconfigured (so callers
+ * never silently read the wrong dataset).
  */
 export function resolveStorageClient(
   name: string,

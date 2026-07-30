@@ -2,10 +2,10 @@
 import { registerEventsCommands } from "@hasna/events/commander";
 import { Command } from "commander";
 import pkg from "../../package.json";
-// The single Store abstraction: routes every read+write to the cloud /v1 API
-// when HASNA_TELEPHONY_STORAGE_MODE=self_hosted (or cloud) + API_URL + API_KEY
-// are set, otherwise to the on-box SQLite store. No CLI command touches sqlite
-// or fetch directly. See ../lib/store/index.ts.
+// The single Store abstraction: routes every read+write to the server's /v1 API
+// when HASNA_TELEPHONY_STORAGE_MODE=postgres + API_URL + API_KEY are set,
+// otherwise to the on-box SQLite store. No CLI command touches sqlite or fetch
+// directly. See ../lib/store/index.ts.
 import { getStore } from "../lib/store/index.js";
 import { HasnaHttpError } from "../generated/storage-client/index.js";
 import { sendSms } from "../lib/sms.js";

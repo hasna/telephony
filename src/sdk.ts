@@ -1,10 +1,10 @@
 // @hasna/telephony — embeddable SDK.
 //
 // Every method routes through the single Store abstraction (getStore) and the
-// provider lib actions. This means the SDK works IDENTICALLY in `local` mode
-// (on-box SQLite) and in `self_hosted`/`cloud` mode (the /v1 HTTP API with a
-// bearer key) — resolved from the client-flip env — WITHOUT requiring a running
-// local REST server. No SDK method touches sqlite or fetch directly.
+// provider lib actions. This means the SDK works IDENTICALLY on the `sqlite`
+// backend (on-box SQLite) and on the `postgres` backend (the server's /v1 HTTP
+// API with a bearer key) — resolved from the client-flip env — WITHOUT requiring
+// a running local REST server. No SDK method touches sqlite or fetch directly.
 
 import { getStore, type TelephonyStore } from "./lib/store/index.js";
 import { sendSms as sendSmsAction } from "./lib/sms.js";

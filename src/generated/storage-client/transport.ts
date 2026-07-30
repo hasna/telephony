@@ -1,34 +1,36 @@
 // Client-side transport resolver for the Hasna Service Contract v1.
 //
-// THIS IS THE B2 CORE FIX. Historically, setting a client to cloud/self_hosted
-// mode was a NO-OP: the CLI/MCP still read the local SQLite/db.json store even
-// though `HASNA_<APP>_STORAGE_MODE=cloud` and a DATABASE_URL were set. A DSN on
-// the client does NOT switch the dataset a CLI reads.
+// THIS IS THE B2 CORE FIX. Historically, pointing a client at server-backed data
+// was a NO-OP: the CLI/MCP still read the on-box SQLite/db.json store even though
+// `HASNA_<APP>_STORAGE_MODE` and a DATABASE_URL were set. A DSN on the client
+// does NOT switch the dataset a CLI reads, and the client never opens PostgreSQL
+// directly.
 //
-// This module makes the client actually talk to the cloud. Given an app name and
+// This module makes the client actually talk to the server. Given an app name and
 // the environment it decides whether reads AND writes should be routed to the
-// app's cloud HTTP API (`<API_URL>/v1`, default `https://<app>.hasna.xyz/v1`)
-// with the API key, or fall through to the local store.
+// app's HTTP API (`<API_URL>/v1`, default `https://<app>.hasna.xyz/v1`) with the
+// API key, or fall through to the on-box store.
 //
 // THE CLIENT-FLIP CONTRACT (env vars). For app `<NAME>` = envToken(name):
 //
-//   Mode   (any one, first match wins; aliases self_hosted/remote/hybrid -> cloud):
-//     HASNA_<NAME>_STORAGE_MODE = cloud | self_hosted | local | ...
-//     HASNA_<NAME>_MODE         = cloud | self_hosted | local | ...   (alias)
-//     <NAME>_STORAGE_MODE                                             (alias)
-//     <NAME>_MODE                                                     (alias)
+//   Data backend (any one, first match wins; `postgresql` == `postgres`):
+//     HASNA_<NAME>_STORAGE_MODE = sqlite | postgres
+//     HASNA_<NAME>_MODE         = sqlite | postgres                    (alias)
+//     <NAME>_STORAGE_MODE                                              (alias)
+//     <NAME>_MODE                                                      (alias)
 //   API base URL (optional; `/v1` is appended automatically):
 //     HASNA_<NAME>_API_URL = https://<app>.hasna.xyz
-//     <NAME>_API_URL                                                  (alias)
+//     <NAME>_API_URL                                                   (alias)
 //   API key (bearer / x-api-key):
 //     HASNA_<NAME>_API_KEY = hasna_<app>_...
-//     <NAME>_API_KEY                                                  (alias)
+//     <NAME>_API_KEY                                                   (alias)
 //
-// DECISION: transport is `cloud-http` IFF the resolved mode is `cloud` AND an API
-// key is present. The base URL defaults to `https://<app>.hasna.xyz` when a key is
-// present but no URL is set. If mode is `cloud` but the API key is MISSING, we do
-// NOT silently serve wrong local data — we return `local` with a loud `warning`
-// and `misconfigured: true` so the caller can hard-fail instead of drifting.
+// DECISION: transport is `cloud-http` IFF the resolved backend is `postgres` AND
+// an API key is present. The base URL defaults to `https://<app>.hasna.xyz` when
+// a key is present but no URL is set. If the backend is `postgres` but the API
+// key is MISSING, we do NOT silently serve wrong on-box data — we return `local`
+// with a loud `warning` and `misconfigured: true` so the caller can hard-fail
+// instead of drifting.
 //
 // SAFETY: this module never returns, logs, or embeds the API key value. Callers
 // receive only presence flags and env-key names.
@@ -92,13 +94,11 @@ export type ClientTransportKind = "local" | "cloud-http";
 export interface ClientTransportResolution {
   /** Where the client should read/write from. */
   transport: ClientTransportKind;
-  /** Resolved storage mode (`local` | `cloud`). */
+  /** Resolved data backend (`sqlite` | `postgres`) the app's rows live in. */
   mode: StorageMode;
-  /** Deprecated mode alias that was normalized (e.g. `self_hosted`), if any. */
-  deprecatedAlias: string | null;
-  /** Env key the mode was read from, or `"default"`. */
+  /** Env key the backend was read from, or `"default"`. */
   modeSource: string;
-  /** `<origin>/v1` base for the cloud API when transport is cloud-http, else null. */
+  /** `<origin>/v1` base for the server API when transport is cloud-http, else null. */
   baseUrl: string | null;
   /** Env key the API URL came from, `"default"` (host template), or null. */
   apiUrlSource: string | null;
@@ -107,9 +107,9 @@ export interface ClientTransportResolution {
   /** Env key the API key came from, or null. */
   apiKeySource: string | null;
   /**
-   * True when the operator asked for cloud but the config is incomplete (no API
-   * key), so we fell back to local. Callers SHOULD treat this as an error rather
-   * than silently reading local data.
+   * True when the operator asked for server-backed data but the config is
+   * incomplete (no API key), so we fell back to the on-box store. Callers SHOULD
+   * treat this as an error rather than silently reading on-box data.
    */
   misconfigured: boolean;
   /** Human-readable warning, or null. Never contains secret values. */
@@ -119,8 +119,8 @@ export interface ClientTransportResolution {
 /**
  * Resolve how a client should reach an app's data given the environment.
  *
- * Precedence for the mode: the first present of `HASNA_<NAME>_STORAGE_MODE`,
- * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `local`.
+ * Precedence for the backend: the first present of `HASNA_<NAME>_STORAGE_MODE`,
+ * `HASNA_<NAME>_MODE`, `<NAME>_STORAGE_MODE`, `<NAME>_MODE`, else `sqlite`.
  */
 export function resolveClientTransport(name: string, env: Env = process.env): ClientTransportResolution {
   const keys = clientTransportEnvKeys(name);
@@ -128,34 +128,25 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
   const urlHit = firstEnv(env, keys.apiUrlKeys);
   const keyHit = firstEnv(env, keys.apiKeyKeys);
 
-  let mode: StorageMode = "local";
-  let deprecatedAlias: string | null = null;
+  let mode: StorageMode = "sqlite";
   let modeSource = "default";
   const warnings: string[] = [];
 
   if (modeHit) {
-    const normalized = normalizeStorageMode(modeHit.value);
-    mode = normalized.mode;
-    deprecatedAlias = normalized.deprecatedAlias;
+    mode = normalizeStorageMode(modeHit.value).mode;
     modeSource = modeHit.key;
-    if (deprecatedAlias) {
-      warnings.push(
-        `Deprecated mode '${deprecatedAlias}' from ${modeHit.key} is treated as 'cloud'. Prefer ${keys.modeKeys[0]}=cloud.`,
-      );
-    }
   } else if (urlHit && keyHit) {
-    // Inferred cloud mode: when both the API URL and API key are set (with no
-    // explicit STORAGE_MODE), route to cloud. Matches @hasna/contracts@0.5.1.
-    mode = "cloud";
+    // Inferred server backend: when both the API URL and API key are set (with
+    // no explicit STORAGE_MODE), the rows live behind the server, so route there.
+    mode = "postgres";
     modeSource = `${urlHit.key}+${keyHit.key}`;
   }
 
-  // Local mode: never route to the network, regardless of URL/key presence.
-  if (mode === "local") {
+  // sqlite backend: never route to the network, regardless of URL/key presence.
+  if (mode === "sqlite") {
     return {
       transport: "local",
       mode,
-      deprecatedAlias,
       modeSource,
       baseUrl: null,
       apiUrlSource: null,
@@ -166,15 +157,14 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     };
   }
 
-  // Cloud mode but no API key: fall back to local, but flag it loudly.
+  // postgres backend but no API key: fall back to the on-box store, loudly.
   if (!keyHit) {
     warnings.push(
-      `${modeSource}=cloud but no API key is set (${keys.apiKeyKeys[0]}). Refusing to route to cloud; using local store. Set ${keys.apiKeyKeys[0]} to enable the cloud client.`,
+      `${modeSource}=postgres but no API key is set (${keys.apiKeyKeys[0]}). Refusing to route to the server API; using the on-box store. Set ${keys.apiKeyKeys[0]} to enable the HTTP client.`,
     );
     return {
       transport: "local",
       mode,
-      deprecatedAlias,
       modeSource,
       baseUrl: null,
       apiUrlSource: null,
@@ -192,11 +182,10 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
     baseUrl = toV1BaseUrl(rawUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    warnings.push(`Invalid API URL from ${apiUrlSource}: ${message}. Using local store.`);
+    warnings.push(`Invalid API URL from ${apiUrlSource}: ${message}. Using the on-box store.`);
     return {
       transport: "local",
       mode,
-      deprecatedAlias,
       modeSource,
       baseUrl: null,
       apiUrlSource: null,
@@ -210,7 +199,6 @@ export function resolveClientTransport(name: string, env: Env = process.env): Cl
   return {
     transport: "cloud-http",
     mode,
-    deprecatedAlias,
     modeSource,
     baseUrl,
     apiUrlSource,
@@ -453,10 +441,10 @@ export function createHasnaHttpTransport(options: HasnaHttpTransportOptions): Ha
 
 /**
  * Convenience: resolve transport from env and, when cloud-http, build the HTTP
- * client in one call. Returns `{ transport: 'local', resolution }` for local, or
- * `{ transport: 'cloud-http', client, resolution }` for cloud. Throws if the
- * config is `misconfigured` (cloud requested but unusable) so callers can't drift
- * onto local data by accident.
+ * client in one call. Returns `{ transport: 'local', resolution }` for the on-box
+ * store, or `{ transport: 'cloud-http', client, resolution }` for the server API.
+ * Throws if the config is `misconfigured` (the postgres backend was requested but
+ * is unusable) so callers can't drift onto on-box data by accident.
  */
 export function createClientTransport(
   name: string,
@@ -467,7 +455,7 @@ export function createClientTransport(
   | { transport: "cloud-http"; client: HasnaHttpTransport; resolution: ClientTransportResolution } {
   const resolution = resolveClientTransport(name, env);
   if (resolution.misconfigured) {
-    throw new Error(resolution.warning ?? `Client for '${name}' is misconfigured for cloud mode.`);
+    throw new Error(resolution.warning ?? `Client for '${name}' is misconfigured for the postgres backend.`);
   }
   if (resolution.transport === "local" || !resolution.baseUrl) {
     return { transport: "local", client: null, resolution };

@@ -28,20 +28,34 @@ describe("telephony Store resolver", () => {
     expect(isCloudStore()).toBe(false);
   });
 
-  it("stays local in self_hosted mode without an API key (no silent drift)", () => {
+  it("stays on the on-box store for the sqlite backend even with URL + key", () => {
     clearEnv();
     const env = {
-      HASNA_TELEPHONY_STORAGE_MODE: "self_hosted",
+      HASNA_TELEPHONY_STORAGE_MODE: "sqlite",
+      HASNA_TELEPHONY_API_URL: "https://telephony.hasna.xyz",
+      HASNA_TELEPHONY_API_KEY: "hasna_telephony_test_key",
+    } as Record<string, string>;
+    const store = getStore(env);
+    expect(store.transport).toBe("local");
+    expect(store).toBeInstanceOf(LocalStore);
+    expect(isCloudStore(env)).toBe(false);
+  });
+
+  it("stays local for the postgres backend without an API key (no silent drift)", () => {
+    clearEnv();
+    const env = {
+      HASNA_TELEPHONY_STORAGE_MODE: "postgres",
       HASNA_TELEPHONY_API_URL: "https://telephony.hasna.xyz",
     } as Record<string, string>;
-    // resolveStorageClient throws when cloud is requested but misconfigured.
+    // resolveStorageClient throws when the server backend is requested but
+    // misconfigured.
     expect(() => getStore(env)).toThrow();
   });
 
-  it("routes to the ApiStore in self_hosted mode with URL + key", () => {
+  it("routes to the ApiStore for the postgres backend with URL + key", () => {
     clearEnv();
     const env = {
-      HASNA_TELEPHONY_STORAGE_MODE: "self_hosted",
+      HASNA_TELEPHONY_STORAGE_MODE: "postgres",
       HASNA_TELEPHONY_API_URL: "https://telephony.hasna.xyz",
       HASNA_TELEPHONY_API_KEY: "hasna_telephony_test_key",
     } as Record<string, string>;
@@ -51,14 +65,31 @@ describe("telephony Store resolver", () => {
     expect(isCloudStore(env)).toBe(true);
   });
 
-  it("accepts the canonical cloud alias too", () => {
+  it("accepts postgresql as the long spelling of postgres", () => {
     clearEnv();
     const env = {
-      HASNA_TELEPHONY_STORAGE_MODE: "cloud",
+      HASNA_TELEPHONY_STORAGE_MODE: "postgresql",
       HASNA_TELEPHONY_API_URL: "https://telephony.hasna.xyz",
       HASNA_TELEPHONY_API_KEY: "hasna_telephony_test_key",
     } as Record<string, string>;
     expect(getStore(env).transport).toBe("cloud-http");
+  });
+
+  // The bug this file's suite exists to keep closed: hasna.contract.json
+  // advertises the sqlite|postgres data-backend switch, so the shipped client
+  // must accept exactly those two words. The vendored client used to accept only
+  // the removed placement vocabulary, which made every value the published
+  // manifest sanctions a hard startup error and every removed word a success.
+  it("rejects the removed placement vocabulary the manifest no longer declares", () => {
+    clearEnv();
+    for (const removed of ["local", "cloud", "self_hosted", "remote", "hybrid"]) {
+      const env = {
+        HASNA_TELEPHONY_STORAGE_MODE: removed,
+        HASNA_TELEPHONY_API_URL: "https://telephony.hasna.xyz",
+        HASNA_TELEPHONY_API_KEY: "hasna_telephony_test_key",
+      } as Record<string, string>;
+      expect(() => getStore(env)).toThrow(/Unknown storage mode/);
+    }
   });
 });
 

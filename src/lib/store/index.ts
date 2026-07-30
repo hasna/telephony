@@ -5,22 +5,26 @@
 // exactly two implementations:
 //
 //   • LocalStore — on-box SQLite. Delegates to the query/mutation helpers in
-//     ../../db/*. The database handle opens lazily on first use, so `local` is
-//     first-class and fully functional; cloud mode never touches sqlite.
-//   • ApiStore   — the self_hosted/cloud HTTP API at `<API_URL>/v1` with a
-//     bearer key. Delegates to the vendored client-flip HTTP storage client.
+//     ../../db/*. The database handle opens lazily on first use, so the `sqlite`
+//     backend is first-class and fully functional; the `postgres` backend never
+//     touches sqlite.
+//   • ApiStore   — the server's HTTP API at `<API_URL>/v1` with a bearer key.
+//     Delegates to the vendored client-flip HTTP storage client.
 //
 // `getStore()` resolves which transport to use from the client-flip env
-// (HASNA_TELEPHONY_API_URL + HASNA_TELEPHONY_API_KEY / HASNA_TELEPHONY_STORAGE_MODE).
-// Callers NEVER branch on mode themselves and NEVER touch sqlite or fetch
-// directly — that was the split-brain bug this module eliminates.
+// (HASNA_TELEPHONY_API_URL + HASNA_TELEPHONY_API_KEY / HASNA_TELEPHONY_STORAGE_MODE
+// = sqlite | postgres). Callers NEVER branch on the backend themselves and NEVER
+// touch sqlite or fetch directly — that was the split-brain bug this module
+// eliminates.
 //
-// `self_hosted` and `cloud` are the SAME client code (ApiStore); only the URL and
-// key differ, and that distinction is server-side tenancy.
+// Who runs the server and what they pay for it is operation, not a storage
+// branch: a user's own server and the hosted SaaS are the SAME client code
+// (ApiStore); only the URL and key differ.
 //
 // SAFETY: the API key never leaves the transport; it is never logged, returned,
 // or embedded in any value produced here. Only the HTTP transport ever holds it.
-// There is NO database DSN on the client — the cloud transport is HTTP + key only.
+// There is NO database DSN on the client — the client never opens PostgreSQL; the
+// server-backed transport is HTTP + key only.
 
 import {
   HasnaHttpError,
@@ -461,7 +465,7 @@ export class LocalStore implements TelephonyStore {
   }
 }
 
-// ── ApiStore (self_hosted / cloud HTTP /v1) ──────────────────────────────────
+// ── ApiStore (the server's HTTP /v1 API) ─────────────────────────────────────
 
 /** Raised for a client op the cloud `/v1` API cannot serve. */
 export class CloudUnsupportedError extends Error {
@@ -730,9 +734,10 @@ let cached: TelephonyStore | null = null;
 
 /**
  * Resolve (and cache) the telephony Store from the client-flip env. Returns an
- * {@link ApiStore} when the env resolves to cloud (mode=cloud/self_hosted +
- * API_URL + API_KEY), else a {@link LocalStore}. Throws if cloud was requested
- * but is misconfigured (so callers never silently read the wrong dataset).
+ * {@link ApiStore} when the env resolves to server-backed data
+ * (STORAGE_MODE=postgres + API_URL + API_KEY), else a {@link LocalStore}. Throws
+ * if the server backend was requested but is misconfigured (so callers never
+ * silently read the wrong dataset).
  */
 export function getStore(env: Env = process.env): TelephonyStore {
   // Cache only the default (process.env) resolution — the hot path for CLI/MCP/

@@ -1,10 +1,9 @@
 /**
  * @hasna/telephony — HTTP serve surface (telephony-serve).
  *
- * A real HTTP API wrapping the telephony core data model. PURE REMOTE per
- * Amendment A1: the service reads and writes the shared cloud Postgres directly
- * (no local cache, no sync engine in the service). Requests are authenticated
- * with @hasna/contracts API-key middleware.
+ * A real HTTP API wrapping the telephony core data model. The service reads and
+ * writes its PostgreSQL backend directly (no on-box cache, no sync engine in the
+ * service). Requests are authenticated with @hasna/contracts API-key middleware.
  *
  * Public probes:
  *   GET  /health          liveness — { status, version, mode }
@@ -34,7 +33,7 @@ import {
   type ApiKeyPrincipal,
 } from "@hasna/contracts/auth";
 import { createTelephonyCloudClient } from "../db/remote-storage.js";
-import type { PoolQueryClient, TypedQueryClient } from "../generated/storage-kit/index.js";
+import type { PoolQueryClient, StorageMode, TypedQueryClient } from "../generated/storage-kit/index.js";
 import { getTwilioClient, hasTwilioConfig } from "../lib/twilio.js";
 import { fetchVoicesFromProvider, hasElevenLabsConfig } from "../lib/tts.js";
 
@@ -340,7 +339,11 @@ export interface ServeDeps {
 
 export function createServeHandler(deps: ServeDeps): (req: Request) => Promise<Response> {
   const db: TypedQueryClient = deps.client;
-  const mode = "cloud";
+  // The serve process only ever runs on the `postgres` backend, so the value it
+  // reports on /health, /ready and /version is that backend name — the same
+  // vocabulary hasna.contract.json declares and the contract health shape
+  // validates. The removed placement words are never emitted.
+  const mode: StorageMode = "postgres";
 
   const authOrThrow = async (req: Request, requiredScopes: string[]): Promise<ApiKeyPrincipal> => {
     const url = new URL(req.url);
@@ -1740,8 +1743,8 @@ export interface RunningServe {
 }
 
 /**
- * Start the telephony HTTP service on Bun. Opens a PURE-REMOTE cloud pool and a
- * contracts API-key verifier backed by the api_keys table (revocation).
+ * Start the telephony HTTP service on Bun. Opens the server's PostgreSQL pool and
+ * a contracts API-key verifier backed by the api_keys table (revocation).
  */
 export async function startTelephonyServe(options: StartServeOptions = {}): Promise<RunningServe> {
   const env = options.env ?? process.env;
@@ -1780,7 +1783,7 @@ export async function startTelephonyServe(options: StartServeOptions = {}): Prom
   }
   const server = BunGlobal.serve({ port, hostname, fetch: handler });
   console.log(
-    `[telephony-serve] listening on http://${hostname}:${server.port} (mode=cloud, version=${version})`,
+    `[telephony-serve] listening on http://${hostname}:${server.port} (storage=postgres, version=${version})`,
   );
 
   return {

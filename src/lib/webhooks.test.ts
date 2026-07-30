@@ -96,7 +96,7 @@ describe("dispatchWebhook", () => {
     try {
       tempRoot = mkdtempSync(join(tmpdir(), "telephony-webhook-dispatch-test-"));
       process.env.HASNA_TELEPHONY_DB_PATH = join(tempRoot, "telephony.db");
-      process.env.HASNA_TELEPHONY_STORAGE_MODE = "cloud";
+      process.env.HASNA_TELEPHONY_STORAGE_MODE = "postgres";
       process.env.HASNA_TELEPHONY_API_URL = `http://127.0.0.1:${cloud.port}`;
       process.env[apiKeyEnvName] = ["synthetic", "api", "key"].join("-");
       resetStore();
