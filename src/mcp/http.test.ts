@@ -1,13 +1,44 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { buildServer } from "./server.js";
 import { isHttpMode, isStdioMode, startMcpHttpServer } from "./http.js";
+import { resetStore } from "../lib/store/index.js";
 
 const repoRoot = new URL("../..", import.meta.url).pathname;
 const MCP_TRANSPORT_ENV_KEYS = new Set(["MCP_HTTP", "MCP_STDIO"]);
+
+/**
+ * Client-flip env keys the in-process MCP server would otherwise inherit from
+ * the operator's shell. These tools must read the on-box store here; a developer
+ * exporting HASNA_TELEPHONY_STORAGE_MODE + an API key would otherwise route the
+ * assertions at a live service, which is not what this file is testing.
+ */
+const CLIENT_FLIP_ENV_KEYS = [
+  "HASNA_TELEPHONY_STORAGE_MODE",
+  "HASNA_TELEPHONY_MODE",
+  "HASNA_TELEPHONY_API_URL",
+  "HASNA_TELEPHONY_API_KEY",
+  "TELEPHONY_STORAGE_MODE",
+  "TELEPHONY_MODE",
+  "TELEPHONY_API_URL",
+  "TELEPHONY_API_KEY",
+] as const;
+
+function withOnBoxStore(): () => void {
+  const saved = new Map(CLIENT_FLIP_ENV_KEYS.map((key) => [key, process.env[key]]));
+  for (const key of CLIENT_FLIP_ENV_KEYS) delete process.env[key];
+  resetStore();
+  return () => {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    resetStore();
+  };
+}
 
 function envWith(overrides: Record<string, string>): Record<string, string> {
   return {
@@ -111,12 +142,19 @@ describe("telephony-mcp stdio transport", () => {
 
 describe("telephony-mcp HTTP transport", () => {
   let httpServer: Awaited<ReturnType<typeof startMcpHttpServer>> | undefined;
+  let restoreStoreEnv: (() => void) | undefined;
+
+  beforeEach(() => {
+    restoreStoreEnv = withOnBoxStore();
+  });
 
   afterEach(async () => {
     if (httpServer) {
       await new Promise<void>((resolve) => httpServer!.server.close(() => resolve()));
       httpServer = undefined;
     }
+    restoreStoreEnv?.();
+    restoreStoreEnv = undefined;
   });
 
   it("serves /health and MCP tool calls over Streamable HTTP", async () => {

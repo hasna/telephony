@@ -5,7 +5,7 @@
  *
  * PURE REMOTE (Amendment A1): runs against the shared cloud Postgres only.
  * Requires:
- *   HASNA_TELEPHONY_STORAGE_MODE=cloud
+ *   HASNA_TELEPHONY_STORAGE_MODE=postgres
  *   HASNA_TELEPHONY_DATABASE_URL=postgres://...   (never logged)
  *
  * Usage:
@@ -47,8 +47,8 @@ const asJson = process.argv.includes("--json");
     }
     process.env[key] = url;
   }
-  // Migrations always target cloud Postgres.
-  process.env.HASNA_TELEPHONY_STORAGE_MODE = "cloud";
+  // Migrations always target the PostgreSQL backend.
+  process.env.HASNA_TELEPHONY_STORAGE_MODE = "postgres";
 }
 
 // The extension migration must run before table DDL that relies on

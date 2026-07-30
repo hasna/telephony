@@ -422,14 +422,19 @@ describe("REST and Twilio safety gates", () => {
   });
 });
 
-describe("cloud-flip read routing", () => {
+describe("server-backed read routing", () => {
   const apiUrlEnv = ["HASNA", "TELEPHONY", "API", "URL"].join("_");
   const apiKeyEnv = ["HASNA", "TELEPHONY", "API", "KEY"].join("_");
 
-  it("serves REST read routes from the Store (cloud) — not local sqlite — when flipped", async () => {
-    // A machine flipped to cloud runs `telephony serve` as a webhook receiver +
-    // dashboard. Its read routes MUST come from the SAME cloud store the inbound
-    // handlers write to; reading local sqlite here is the split-brain bug.
+  it("serves REST read routes from the Store (server API) — not on-box sqlite — when flipped", async () => {
+    // A machine pointed at server-backed data runs `telephony serve` as a webhook
+    // receiver + dashboard. Its read routes MUST come from the SAME store the
+    // inbound handlers write to; reading on-box sqlite here is the split-brain bug.
+    //
+    // Start from a cleared client-flip env: an operator shell exporting
+    // HASNA_TELEPHONY_STORAGE_MODE must not decide this repo's verdict, and this
+    // case is specifically about the URL+key inference path with no mode set.
+    clearClientStoreEnv();
     const seenPaths: string[] = [];
     const cloud = Bun.serve({
       port: 0,

@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import {
-  createCloudPoolFromEnv,
+  createServerPoolFromEnv,
   type PoolQueryClient,
 } from "../generated/storage-kit/index.js";
 
@@ -8,15 +8,17 @@ import {
 export const TELEPHONY_APP_NAME = "telephony";
 
 /**
- * Build a PURE REMOTE cloud query client from the environment.
+ * Build the serve process's PostgreSQL query client from the environment.
  *
- * Requires `HASNA_TELEPHONY_STORAGE_MODE=cloud` and
- * `HASNA_TELEPHONY_DATABASE_URL`. Throws (without logging the URL) when the
- * mode is not `cloud` or the URL is missing. Returns the kit's typed client so
- * callers get `query/many/get/one/execute/transaction` uniformly.
+ * Requires the `postgres` data backend and `HASNA_TELEPHONY_DATABASE_URL`.
+ * Setting the URL is enough — the kit resolves `postgres` from its presence —
+ * and `HASNA_TELEPHONY_STORAGE_MODE=postgres` states it explicitly. Throws
+ * (without logging the URL) when the backend resolves to `sqlite` or the URL is
+ * missing. Returns the kit's typed client so callers get
+ * `query/many/get/one/execute/transaction` uniformly.
  */
 export function createTelephonyCloudClient(): PoolQueryClient {
-  const client = createCloudPoolFromEnv(TELEPHONY_APP_NAME, {
+  const client = createServerPoolFromEnv(TELEPHONY_APP_NAME, {
     applicationName: "@hasna/telephony",
   }).client;
   attachPoolErrorHandler(client.pool);

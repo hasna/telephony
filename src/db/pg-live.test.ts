@@ -1,5 +1,5 @@
 /**
- * Live PostgreSQL gate for the cloud (PURE REMOTE) storage path.
+ * Live PostgreSQL gate for the `postgres` storage backend.
  *
  * This is the test named by `storage.pgTestGate` in hasna.contract.json — the
  * proof that telephony's declared `postgres` storage engine is a real, working
@@ -63,9 +63,9 @@ describeLive("live PostgreSQL storage engine", () => {
     for (const key of ["HASNA_TELEPHONY_STORAGE_MODE", "HASNA_TELEPHONY_DATABASE_URL"]) {
       savedEnv[key] = process.env[key];
     }
-    // Drive the real shipped path: mode + DSN come from the canonical env
-    // contract, and the client is the one the serve process uses.
-    process.env.HASNA_TELEPHONY_STORAGE_MODE = "cloud";
+    // Drive the real shipped path: the data backend + DSN come from the
+    // canonical env contract, and the client is the one the serve process uses.
+    process.env.HASNA_TELEPHONY_STORAGE_MODE = "postgres";
     process.env.HASNA_TELEPHONY_DATABASE_URL = scopedDsn(dsn, schema);
     client = createTelephonyCloudClient();
   });

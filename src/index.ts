@@ -1,4 +1,4 @@
-// Embeddable SDK (routes through the Store — works local and self_hosted/cloud)
+// Embeddable SDK (routes through the Store — works on the sqlite and postgres backends)
 export { TelephonyClient, createClient } from "./sdk.js";
 export type { TelephonyClientOptions } from "./sdk.js";
 
@@ -30,7 +30,7 @@ export type {
   ScheduleFilters,
 } from "./lib/store/index.js";
 
-// Server bootstrap + cloud storage (self_hosted service side, PURE REMOTE)
+// Server bootstrap + PostgreSQL storage (the service side of the postgres backend)
 export { createTelephonyCloudClient, TELEPHONY_APP_NAME } from "./db/remote-storage.js";
 export { telephonyOpenApi, startTelephonyServe, createServeHandler, TELEPHONY_SERVE_APP } from "./server/cloud-serve.js";
 

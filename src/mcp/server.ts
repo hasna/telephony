@@ -2,10 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import pkg from "../../package.json";
 // Storage routed through the single Store abstraction: on-box SQLite by default,
-// or the cloud /v1 HTTP API when the telephony client-flip env resolves to cloud
-// (HASNA_TELEPHONY_STORAGE_MODE=cloud/self_hosted, or API_URL+API_KEY). This
-// mirrors the CLI wiring (src/cli/index.ts -> ../lib/store) so the MCP honors the
-// self_hosted flip too instead of always reading/writing the local island. No
+// or the server's /v1 HTTP API when the telephony client-flip env resolves to the
+// postgres backend (HASNA_TELEPHONY_STORAGE_MODE=postgres, or API_URL+API_KEY).
+// This mirrors the CLI wiring (src/cli/index.ts -> ../lib/store) so the MCP
+// honors the flip too instead of always reading/writing the on-box island. No
 // MCP tool touches sqlite or fetch directly.
 import { getStore } from "../lib/store/index.js";
 import { sendSms } from "../lib/sms.js";
